@@ -1,15 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useSelector } from 'react-redux';
 import { Navigate } from 'react-router-dom';
-import { ROLE_HOME } from '../../data/users';
-
-const DEMO_CREDS = [
-  { role: 'Admin', email: 'admin@dwarkadental.com', password: 'admin123', color: 'bg-violet-50 text-violet-700 border-violet-200' },
-  { role: 'Doctor', email: 'doctor@dwarkadental.com', password: 'doctor123', color: 'bg-[var(--color-primary-50)] text-[var(--color-primary-700)] border-[var(--color-primary-200)]' },
-  { role: 'Receptionist', email: 'receptionist@dwarkadental.com', password: 'recep123', color: 'bg-amber-50 text-amber-700 border-amber-200' },
-];
+import { ROLE_HOME } from '../../constants/routes';
 
 export default function LoginPage() {
   const { login, isLoading, error } = useAuth();
@@ -18,7 +12,6 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
 
   // Redirect if already authenticated
   if (isAuthenticated && role) {
@@ -28,11 +21,6 @@ export default function LoginPage() {
   async function handleSubmit(e) {
     e.preventDefault();
     await login(email, password);
-  }
-
-  function fillDemo(cred) {
-    setEmail(cred.email);
-    setPassword(cred.password);
   }
 
   return (
@@ -97,23 +85,6 @@ export default function LoginPage() {
             <h2 className="text-xl font-semibold text-[var(--color-text)] mb-1">Sign in</h2>
             <p className="text-sm text-[var(--color-text-muted)] mb-6">Enter your credentials to access the system.</p>
 
-            {/* Demo role shortcuts */}
-            <div className="mb-6">
-              <p className="text-xs font-medium text-[var(--color-text-muted)] mb-2">Quick access — Demo credentials:</p>
-              <div className="flex flex-wrap gap-2">
-                {DEMO_CREDS.map(cred => (
-                  <button
-                    key={cred.role}
-                    type="button"
-                    onClick={() => fillDemo(cred)}
-                    className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-opacity hover:opacity-80 cursor-pointer ${cred.color}`}
-                  >
-                    {cred.role}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Error alert */}
             {error && (
               <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-200 mb-4" role="alert">
@@ -169,22 +140,7 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {/* Remember me / Forgot */}
-              <div className="flex items-center justify-between mb-6">
-                <label className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    id="remember-me"
-                    checked={rememberMe}
-                    onChange={e => setRememberMe(e.target.checked)}
-                    className="rounded border-[var(--color-border)]"
-                  />
-                  Remember me
-                </label>
-                <button type="button" className="text-sm text-[var(--color-primary-500)] hover:text-[var(--color-primary-600)] cursor-pointer">
-                  Forgot password?
-                </button>
-              </div>
+
 
               {/* Submit */}
               <button

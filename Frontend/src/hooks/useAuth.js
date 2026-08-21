@@ -1,8 +1,11 @@
 import { useSelector, useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { loginStart, loginSuccess, loginFailure, logout as logoutAction } from '../app/store';
-import { ROLE_HOME } from '../data/users';
+import { ROLE_HOME } from '../constants/routes';
 import { api } from '../utils/api';
+
+/** localStorage key for persisting the session */
+const SESSION_KEY = 'ddc:session';
 
 /**
  * Hook for authentication state and actions connected to Backend.
@@ -10,10 +13,10 @@ import { api } from '../utils/api';
 export function useAuth() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const { user, role, isAuthenticated, isLoading, error } = useSelector(state => state.auth);
+  const { user, role, isAuthenticated, isLoading, error } = useSelector((state) => state.auth);
 
   /**
-   * Real login - calls Express SQLite backend API.
+   * Login function — authenticates via API, persists session, navigates to dashboard.
    * @param {string} email
    * @param {string} password
    */
@@ -21,28 +24,43 @@ export function useAuth() {
     dispatch(loginStart());
     try {
       const response = await api.login(email, password);
-      if (response.success) {
-        dispatch(loginSuccess({ user: response.user, role: response.role }));
-        
-        // Save role in local storage for api headers
-        localStorage.setItem('persist:auth', JSON.stringify({ role: response.role }));
-        
-        navigate(ROLE_HOME[response.role]);
+
+      // Support both flat response and nested data wrapper shapes
+      const userData = response.user || (response.data && response.data.user);
+      const userRole = response.role || (response.data && response.data.role) || userData?.role;
+
+      if (response.success && userData) {
+        dispatch(loginSuccess({ user: userData, role: userRole }));
+
+        // Persist session so page refresh doesn't lose auth state
+        try {
+          localStorage.setItem(SESSION_KEY, JSON.stringify({ user: userData, role: userRole }));
+          // Keep legacy key for apiSlice prepareHeaders compatibility
+          localStorage.setItem('persist:auth', JSON.stringify({ role: userRole }));
+        } catch (_) {}
+
+        const destPath = ROLE_HOME[userRole] || '/admin';
+        navigate(destPath, { replace: true });
         return { success: true };
       } else {
-        dispatch(loginFailure(response.error || 'Invalid email or password.'));
-        return { success: false };
+        const errMsg = response.message || response.error || 'Invalid email or password.';
+        dispatch(loginFailure(errMsg));
+        return { success: false, error: errMsg };
       }
     } catch (err) {
-      dispatch(loginFailure(err.message || 'Failed to connect to server.'));
-      return { success: false };
+      const errMsg = err.message || 'Failed to connect to server.';
+      dispatch(loginFailure(errMsg));
+      return { success: false, error: errMsg };
     }
   }
 
   function logout() {
     dispatch(logoutAction());
-    localStorage.removeItem('persist:auth');
-    navigate('/login');
+    try {
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem('persist:auth');
+    } catch (_) {}
+    navigate('/login', { replace: true });
   }
 
   return { user, role, isAuthenticated, isLoading, error, login, logout };

@@ -43,7 +43,7 @@ async function apiCall(endpoint, options = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(data.error || `HTTP error! status: ${response.status}`);
+    throw new Error(data.message || data.error || `HTTP error! status: ${response.status}`);
   }
 
   return data;
