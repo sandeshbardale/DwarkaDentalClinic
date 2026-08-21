@@ -1,6 +1,7 @@
 // Receptionist patients page — same UI as admin, different base path
-import { useState } from 'react';
-import { MOCK_PATIENTS } from '../../data/patients';
+import { useState, useEffect } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchPatientsList } from '../../app/store';
 import { MOCK_DOCTORS } from '../../data/doctors';
 import { StatusBadge } from '../../components/ui/Badge';
 import Avatar from '../../components/ui/Avatar';
@@ -12,14 +13,21 @@ import EmptyState from '../../components/ui/EmptyState';
 const STATUS_OPTIONS = ['all', 'new', 'active', 'follow-up', 'completed', 'inactive'];
 
 export default function PatientsPage() {
+  const dispatch = useDispatch();
+  const patients = useSelector(state => state.patients.list);
+
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage] = useState(1);
   const PER_PAGE = 10;
 
+  useEffect(() => {
+    dispatch(fetchPatientsList());
+  }, [dispatch]);
+
   const doctorMap = Object.fromEntries(MOCK_DOCTORS.map(d => [d.id, d.name]));
 
-  const filtered = MOCK_PATIENTS.filter(p => {
+  const filtered = patients.filter(p => {
     const q = search.toLowerCase();
     const matchSearch = !q || p.name.toLowerCase().includes(q) || p.patientId.toLowerCase().includes(q) || p.phone.includes(q);
     const matchStatus = statusFilter === 'all' || p.status === statusFilter;

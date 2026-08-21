@@ -1,12 +1,10 @@
 import { useEffect } from 'react';
-import { useDispatch } from 'react-redux';
-import { setAppointments, setNotifications } from '../../app/store';
-import { MOCK_APPOINTMENTS, TODAY } from '../../data/appointments';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchAppointmentsList } from '../../app/store';
 import { MOCK_NOTIFICATIONS } from '../../data/notifications';
 import { MOCK_FOLLOW_UPS } from '../../data/diagnoses';
-import { MOCK_PATIENTS } from '../../data/patients';
 import { useAuth } from '../../hooks/useAuth';
-import { formatTime, formatDate } from '../../utils/formatters';
+import { formatTime, formatDate, today } from '../../utils/formatters';
 import { StatusBadge } from '../../components/ui/Badge';
 import { KPICard } from '../../components/ui/Card';
 import Avatar from '../../components/ui/Avatar';
@@ -19,17 +17,18 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 export default function DoctorDashboardPage() {
   const dispatch = useDispatch();
   const { user } = useAuth();
+  const appointments = useSelector(state => state.appointments.list);
 
   useEffect(() => {
-    dispatch(setAppointments(MOCK_APPOINTMENTS));
-    dispatch(setNotifications(MOCK_NOTIFICATIONS));
+    dispatch(fetchAppointmentsList());
   }, [dispatch]);
 
-  // Doctor DOC-001 = Dr. Neha Sharma (logged-in demo doctor)
-  const todayApts = MOCK_APPOINTMENTS.filter(a => a.date === TODAY && a.doctorId === 'DOC-001')
+  // Filter based on today's date and the logged-in doctor's ID
+  const todayStr = today();
+  const todayApts = appointments.filter(a => a.date === todayStr && a.doctorId === user?.id)
     .sort((a, b) => a.time.localeCompare(b.time));
 
-  const followUps = MOCK_FOLLOW_UPS.filter(f => f.doctorId === 'DOC-001');
+  const followUps = MOCK_FOLLOW_UPS.filter(f => f.doctorId === user?.id || f.doctorId === 'DOC-001');
   const dueToday = followUps.filter(f => f.status === 'due-today');
   const upcoming = followUps.filter(f => f.status !== 'due-today');
 

@@ -1,4 +1,5 @@
 import { configureStore, createSlice } from '@reduxjs/toolkit';
+import { api } from '../utils/api';
 
 // ─── Auth Slice ──────────────────────────────────────────────────────────────
 const authSlice = createSlice({
@@ -166,6 +167,75 @@ export const { toggleSidebar, toggleMobileSidebar, closeMobileSidebar, addToast,
 export const { setPatients, setSelectedPatient, setSearchQuery, setFilterStatus, addPatient, updatePatient } = patientSlice.actions;
 export const { setAppointments, addAppointment, updateAppointment, setFilterDate, setFilterDoctor, setAppointmentFilterStatus } = appointmentSlice.actions;
 export const { setNotifications, markAsRead, markAllAsRead } = notificationSlice.actions;
+
+// Async Thunks
+export const fetchPatientsList = () => async (dispatch) => {
+  try {
+    const list = await api.getPatients();
+    dispatch(setPatients(list));
+  } catch (err) {
+    console.error('Fetch patients failed:', err);
+  }
+};
+
+export const fetchAppointmentsList = () => async (dispatch) => {
+  try {
+    const list = await api.getAppointments();
+    dispatch(setAppointments(list));
+  } catch (err) {
+    console.error('Fetch appointments failed:', err);
+  }
+};
+
+export const savePatientThunk = (patientData) => async (dispatch) => {
+  try {
+    const response = await api.addPatient(patientData);
+    if (response.success) {
+      dispatch(addPatient(response.patient));
+      if (response.appointment) {
+        dispatch(addAppointment(response.appointment));
+      }
+      return response;
+    }
+  } catch (err) {
+    console.error('Save patient failed:', err);
+    dispatch(addToast({ type: 'error', title: 'Registration Failed', message: err.message }));
+    throw err;
+  }
+};
+
+export const bookAppointmentThunk = (aptData) => async (dispatch) => {
+  try {
+    const response = await api.bookAppointment(aptData);
+    if (response.success) {
+      dispatch(addAppointment(response.appointment));
+      return response;
+    }
+  } catch (err) {
+    console.error('Book appointment failed:', err);
+    dispatch(addToast({ type: 'error', title: 'Booking Failed', message: err.message }));
+    throw err;
+  }
+};
+
+export const updateAppointmentStatusThunk = (id, status, nextDate = null, nextTime = null, notes = undefined) => async (dispatch) => {
+  try {
+    const response = await api.updateAppointmentStatus(id, status, nextDate, nextTime, notes);
+    if (response.success) {
+      dispatch(updateAppointment(response.appointment));
+      if (response.followUpAppointment) {
+        dispatch(addAppointment(response.followUpAppointment));
+      }
+      dispatch(fetchPatientsList());
+      dispatch(fetchAppointmentsList());
+      return response;
+    }
+  } catch (err) {
+    console.error('Update appointment status failed:', err);
+    dispatch(addToast({ type: 'error', title: 'Update Failed', message: err.message }));
+    throw err;
+  }
+};
 
 const store = configureStore({
   reducer: {

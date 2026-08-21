@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 import { Search, Filter, Calendar } from 'lucide-react';
-import { MOCK_APPOINTMENTS, APPOINTMENT_TYPES } from '../../data/appointments';
+import { fetchAppointmentsList } from '../../app/store';
 import { MOCK_DOCTORS } from '../../data/doctors';
 import { StatusBadge } from '../../components/ui/Badge';
 import Avatar from '../../components/ui/Avatar';
@@ -10,13 +11,20 @@ import EmptyState from '../../components/ui/EmptyState';
 const STATUSES = ['all', 'scheduled', 'confirmed', 'in-progress', 'completed', 'cancelled', 'no-show'];
 
 export default function AppointmentsPage() {
+  const dispatch = useDispatch();
+  const appointments = useSelector(state => state.appointments.list);
+
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [doctorFilter, setDoctorFilter] = useState('all');
   const [page, setPage] = useState(1);
   const PER_PAGE = 12;
 
-  const filtered = MOCK_APPOINTMENTS.filter(a => {
+  useEffect(() => {
+    dispatch(fetchAppointmentsList());
+  }, [dispatch]);
+
+  const filtered = appointments.filter(a => {
     const q = search.toLowerCase();
     const matchSearch = !q || a.patientName.toLowerCase().includes(q) || a.doctorName.toLowerCase().includes(q) || a.type.toLowerCase().includes(q);
     const matchStatus = statusFilter === 'all' || a.status === statusFilter;

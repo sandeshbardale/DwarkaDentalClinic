@@ -17,5 +17,6 @@ export default function UnauthorizedPage() {
         </Link>
       </div>
     </div>
+
   );
 }

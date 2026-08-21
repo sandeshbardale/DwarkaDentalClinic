@@ -1,30 +1,44 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Save, CheckCircle, Pill, Calendar, FileText, ClipboardList, Phone, MapPin } from 'lucide-react';
-import { MOCK_PATIENTS } from '../../data/patients';
-import { MOCK_CLINICAL_RECORDS } from '../../data/diagnoses';
+import { ArrowLeft, Plus, Save, CheckCircle, Pill, Calendar, FileText, ClipboardList, Phone, MapPin, Sparkles, Scissors, Image as ImageIcon } from 'lucide-react';
 import { MOCK_DOCTORS } from '../../data/doctors';
 import { StatusBadge } from '../../components/ui/Badge';
 import Avatar from '../../components/ui/Avatar';
-import { formatDate, formatTime, generateId } from '../../utils/formatters';
+import { formatDate, formatTime, generateId, today } from '../../utils/formatters';
 import EmptyState from '../../components/ui/EmptyState';
-import Modal from '../../components/ui/Modal';
 import { useDispatch } from 'react-redux';
 import { addToast } from '../../app/store';
+import { api } from '../../utils/api';
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: FileText },
   { id: 'history', label: 'Visit History', icon: ClipboardList },
   { id: 'record', label: 'New Clinical Record', icon: Plus },
+  { id: 'ai', label: 'AI Cavity Detection', icon: Sparkles },
 ];
 
 export default function PatientDetailPage({ basePath = '/doctor' }) {
   const { id } = useParams();
   const dispatch = useDispatch();
   const [activeTab, setActiveTab] = useState('overview');
-  const [records, setRecords] = useState(MOCK_CLINICAL_RECORDS.filter(r => r.patientId === id));
+
+  const [patient, setPatient] = useState(null);
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  // AI X-Ray states
+  const [xrayFile, setXrayFile] = useState(null);
+  const [xrayPreview, setXrayPreview] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiReport, setAiReport] = useState(null);
+
+  // Interactive Canvas Crop box states (percentage of parent container dimensions)
+  const [cropBox, setCropBox] = useState({ x: 25, y: 25, width: 50, height: 50 });
+  const containerRef = useRef(null);
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0, boxX: 0, boxY: 0 });
 
   // Clinical record form state
   const [form, setForm] = useState({
@@ -37,19 +51,31 @@ export default function PatientDetailPage({ basePath = '/doctor' }) {
     prescriptions: [{ medicine: '', dosage: '', duration: '', instructions: '' }],
   });
 
-  const patient = MOCK_PATIENTS.find(p => p.id === id);
-  const doctor = MOCK_DOCTORS.find(d => d.id === patient?.assignedDoctorId);
+  const loadPatientData = async () => {
+    setLoading(true);
+    try {
+      const pats = await api.getPatients();
+      const found = pats.find(p => p.id === id);
+      setPatient(found || null);
 
-  if (!patient) {
-    return (
-      <div className="animate-fade-in">
-        <Link to={`${basePath}/patients`} className="inline-flex items-center gap-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] mb-4">
-          <ArrowLeft size={15} /> Back
-        </Link>
-        <EmptyState title="Patient not found" />
-      </div>
-    );
-  }
+      if (found) {
+        const clns = await api.getClinicalRecords(id);
+        setRecords(clns);
+        
+        // Populate default complaint
+        setForm(f => ({ ...f, chiefComplaint: found.chiefComplaint || '' }));
+      }
+    } catch (err) {
+      console.error(err);
+      dispatch(addToast({ type: 'error', title: 'Data Load Error', message: 'Failed to retrieve patient medical profile.' }));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadPatientData();
+  }, [id]);
 
   function updateForm(field, value) {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -77,26 +103,171 @@ export default function PatientDetailPage({ basePath = '/doctor' }) {
       return;
     }
     setSaving(true);
-    await new Promise(r => setTimeout(r, 700));
+    try {
+      const recordData = {
+        patientId: id,
+        appointmentId: null, // General clinical visit record
+        doctorId: 'DOC-001', // Predefined logged-in doctor
+        chiefComplaint: form.chiefComplaint,
+        diagnosis: form.diagnosis,
+        treatment: form.treatment,
+        clinicalNotes: form.clinicalNotes,
+        followUpDate: form.followUpDate || null,
+        followUpInstructions: form.followUpInstructions,
+        prescription: form.prescriptions.filter(rx => rx.medicine),
+      };
 
-    const newRecord = {
-      id: generateId('CLN'),
-      patientId: id,
-      appointmentId: null,
-      doctorId: 'DOC-001',
-      doctorName: 'Dr. Neha Sharma',
-      visitDate: '2024-08-18',
-      ...form,
-      prescription: form.prescriptions.filter(rx => rx.medicine),
-      status: 'completed',
+      const response = await api.addClinicalRecord(recordData);
+      if (response.success) {
+        setSaved(true);
+        dispatch(addToast({ type: 'success', title: 'Record Saved', message: `Clinical record successfully saved for patient.` }));
+        // Reset form
+        setForm({
+          chiefComplaint: patient?.chiefComplaint || '',
+          diagnosis: '',
+          treatment: '',
+          clinicalNotes: '',
+          followUpDate: '',
+          followUpInstructions: '',
+          prescriptions: [{ medicine: '', dosage: '', duration: '', instructions: '' }],
+        });
+        // Reload clinical records
+        const clns = await api.getClinicalRecords(id);
+        setRecords(clns);
+        setActiveTab('history');
+      }
+    } catch (err) {
+      dispatch(addToast({ type: 'error', title: 'Save Failed', message: err.message }));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ─── AI X-RAY UPLOADER & CROP LOGIC ─────────────────────────────────────────
+  const handleXrayChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setXrayFile(file);
+      setXrayPreview(URL.createObjectURL(file));
+      setAiReport(null);
+    }
+  };
+
+  // Draggable crop overlay mouse events
+  const startDrag = (e) => {
+    isDragging.current = true;
+    dragStart.current = {
+      x: e.clientX,
+      y: e.clientY,
+      boxX: cropBox.x,
+      boxY: cropBox.y
     };
-    setRecords(prev => [newRecord, ...prev]);
-    setSaving(false);
-    setSaved(true);
-    setActiveTab('history');
-    dispatch(addToast({ type: 'success', title: 'Record Saved', message: `Clinical record for ${patient.name} has been saved.` }));
-    // Reset form
-    setForm({ chiefComplaint: '', diagnosis: '', treatment: '', clinicalNotes: '', followUpDate: '', followUpInstructions: '', prescriptions: [{ medicine: '', dosage: '', duration: '', instructions: '' }] });
+    document.addEventListener('mousemove', onDrag);
+    document.addEventListener('mouseup', stopDrag);
+  };
+
+  const onDrag = (e) => {
+    if (!isDragging.current || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    
+    const deltaX = ((e.clientX - dragStart.current.x) / rect.width) * 100;
+    const deltaY = ((e.clientY - dragStart.current.y) / rect.height) * 100;
+
+    let newX = Math.max(0, Math.min(100 - cropBox.width, dragStart.current.boxX + deltaX));
+    let newY = Math.max(0, Math.min(100 - cropBox.height, dragStart.current.boxY + deltaY));
+
+    setCropBox(prev => ({
+      ...prev,
+      x: Math.round(newX),
+      y: Math.round(newY)
+    }));
+  };
+
+  const stopDrag = () => {
+    isDragging.current = false;
+    document.removeEventListener('mousemove', onDrag);
+    document.removeEventListener('mouseup', stopDrag);
+  };
+
+  // Perform tooth crop using Canvas context draw and dispatch to AI
+  const handleCropAndAnalyze = () => {
+    const img = document.getElementById('xray-img-source');
+    if (!img) return;
+
+    setAnalyzing(true);
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    // Natural sizes
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
+
+    const cropX = (cropBox.x / 100) * nw;
+    const cropY = (cropBox.y / 100) * nh;
+    const cropW = (cropBox.width / 100) * nw;
+    const cropH = (cropBox.height / 100) * nh;
+
+    canvas.width = cropW;
+    canvas.height = cropH;
+
+    // Draw the cropped portion
+    ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+    canvas.toBlob(async (blob) => {
+      if (!blob) {
+        setAnalyzing(false);
+        return;
+      }
+      try {
+        const file = new File([blob], `crop-${Date.now()}.png`, { type: 'image/png' });
+        const response = await api.uploadXray(id, file);
+        if (response.success) {
+          setAiReport(response.report);
+          dispatch(addToast({
+            type: 'success',
+            title: 'AI Analysis Complete',
+            message: `Result: ${response.report.result} (Confidence: ${(response.report.confidence * 100).toFixed(0)}%)`
+          }));
+        }
+      } catch (err) {
+        dispatch(addToast({ type: 'error', title: 'Analysis Failed', message: err.message }));
+      } finally {
+        setAnalyzing(false);
+      }
+    }, 'image/png');
+  };
+
+  // Apply suggestion directly to diagnosis form ("AI assist, Doctor decides")
+  const applyAiSuggestion = () => {
+    if (!aiReport) return;
+    setForm(f => ({
+      ...f,
+      diagnosis: `AI Analysis detected: ${aiReport.result} (${(aiReport.confidence * 100).toFixed(0)}% confidence).`,
+      treatment: aiReport.suggestions === 'No treatment needed' ? 'Regular scaling & routine check-ups recommended.' : `${aiReport.suggestions} procedure required.`,
+    }));
+    setActiveTab('record');
+    dispatch(addToast({ type: 'success', title: 'Suggestion Applied', message: 'Form populated with AI recommendations.' }));
+  };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <svg className="w-8 h-8 animate-spin text-[var(--color-primary-500)] mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="10" strokeOpacity="0.3"/>
+          <path d="M12 2a10 10 0 0 1 10 10"/>
+        </svg>
+        <p className="text-sm text-[var(--color-text-muted)]">Loading clinical files...</p>
+      </div>
+    );
+  }
+
+  if (!patient) {
+    return (
+      <div className="animate-fade-in">
+        <EmptyState title="Patient not found" />
+      </div>
+    );
   }
 
   return (
@@ -118,11 +289,11 @@ export default function PatientDetailPage({ basePath = '/doctor' }) {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
               <div><p className="text-xs text-[var(--color-text-subtle)]">Age / Gender</p><p className="font-medium">{patient.age} · {patient.gender}</p></div>
               <div><p className="text-xs text-[var(--color-text-subtle)]">Blood Group</p><p className="font-medium">{patient.bloodGroup}</p></div>
-              <div><p className="text-xs text-[var(--color-text-subtle)]">Allergies</p><p className={`font-medium ${patient.allergies !== 'None' ? 'text-amber-600' : ''}`}>{patient.allergies}</p></div>
+              <div><p className="text-xs text-[var(--color-text-subtle)]">Allergies</p><p className={`font-medium ${patient.allergies !== 'None' ? 'text-amber-600 font-semibold' : ''}`}>{patient.allergies}</p></div>
               <div><p className="text-xs text-[var(--color-text-subtle)]">Total Visits</p><p className="font-medium">{patient.totalVisits}</p></div>
             </div>
             {patient.medicalHistory && patient.medicalHistory !== 'No significant medical history' && (
-              <p className="text-xs text-red-600 bg-red-50 px-3 py-1.5 rounded-lg mt-3 border border-red-100 inline-block">
+              <p className="text-xs text-red-600 bg-red-50 px-3 py-1.5 rounded-lg mt-3 border border-red-100 inline-block font-semibold">
                 ⚠️ Medical History: {patient.medicalHistory}
               </p>
             )}
@@ -139,7 +310,6 @@ export default function PatientDetailPage({ basePath = '/doctor' }) {
             className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap cursor-pointer ${activeTab === tab.id ? 'border-[var(--color-primary-500)] text-[var(--color-primary-500)]' : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
           >
             <tab.icon size={14} /> {tab.label}
-            {tab.id === 'record' && <span className="ml-1 w-5 h-5 rounded-full bg-[var(--color-primary-500)] text-white text-[9px] flex items-center justify-center">New</span>}
           </button>
         ))}
       </div>
@@ -184,9 +354,9 @@ export default function PatientDetailPage({ basePath = '/doctor' }) {
                   <div><p className="text-xs text-[var(--color-text-muted)] mb-0.5">Complaint</p><p>{rec.chiefComplaint}</p></div>
                   <div><p className="text-xs text-[var(--color-text-muted)] mb-0.5">Diagnosis</p><p className="font-medium text-[var(--color-text)]">{rec.diagnosis}</p></div>
                   <div><p className="text-xs text-[var(--color-text-muted)] mb-0.5">Treatment</p><p>{rec.treatment}</p></div>
-                  <div><p className="text-xs text-[var(--color-text-muted)] mb-0.5">Notes</p><p className="text-[var(--color-text-muted)]">{rec.clinicalNotes}</p></div>
+                  <div><p className="text-xs text-[var(--color-text-muted)] mb-0.5">Notes</p><p className="text-[var(--color-text-muted)]">{rec.clinicalNotes || '—'}</p></div>
                 </div>
-                {rec.prescription?.length > 0 && (
+                {rec.prescription && rec.prescription.length > 0 && (
                   <div className="bg-[var(--color-bg)] rounded-lg p-3 border border-[var(--color-border)]">
                     <p className="text-xs font-medium text-[var(--color-text-muted)] mb-2 flex items-center gap-1"><Pill size={11} /> Prescription</p>
                     {rec.prescription.map((rx, i) => (
@@ -196,7 +366,7 @@ export default function PatientDetailPage({ basePath = '/doctor' }) {
                 )}
                 {rec.followUpDate && (
                   <div className="mt-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-lg border border-amber-200">
-                    <Calendar size={12} /> Follow-up: {formatDate(rec.followUpDate)} — {rec.followUpInstructions}
+                    <Calendar size={12} /> Follow-up: {formatDate(rec.followUpDate)} — {rec.followUpInstructions || 'Routine review'}
                   </div>
                 )}
               </div>
@@ -208,7 +378,17 @@ export default function PatientDetailPage({ basePath = '/doctor' }) {
       {/* New clinical record tab */}
       {activeTab === 'record' && (
         <div className="card p-6 space-y-5">
-          <h2 className="text-base font-semibold text-[var(--color-text)]">New Clinical Record — {formatDate('2024-08-18')}</h2>
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <h2 className="text-base font-semibold text-[var(--color-text)]">New Clinical Record — {formatDate(today())}</h2>
+            {aiReport && (
+              <button
+                onClick={applyAiSuggestion}
+                className="flex items-center gap-1.5 text-xs px-3 h-8 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 font-semibold cursor-pointer hover:bg-indigo-100 transition-colors"
+              >
+                <Sparkles size={13} /> Apply AI Recommendation Suggestion
+              </button>
+            )}
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
@@ -229,7 +409,7 @@ export default function PatientDetailPage({ basePath = '/doctor' }) {
             </div>
             <div>
               <label htmlFor="followUpDate" className="text-sm font-medium block mb-1">Follow-up Date</label>
-              <input id="followUpDate" type="date" value={form.followUpDate} onChange={e => updateForm('followUpDate', e.target.value)} className="form-input" min="2024-08-19" />
+              <input id="followUpDate" type="date" value={form.followUpDate} onChange={e => updateForm('followUpDate', e.target.value)} className="form-input" min={today()} />
             </div>
             <div>
               <label htmlFor="followUpInstr" className="text-sm font-medium block mb-1">Follow-up Instructions</label>
@@ -273,6 +453,133 @@ export default function PatientDetailPage({ basePath = '/doctor' }) {
                 <CheckCircle size={16} /> Record saved!
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* AI Cavity Detection Tab */}
+      {activeTab === 'ai' && (
+        <div className="card p-6 space-y-6">
+          <div>
+            <h2 className="text-base font-semibold text-[var(--color-text)] flex items-center gap-1.5">
+              <Sparkles size={16} className="text-indigo-600" /> AI-Assisted Cavity Detection
+            </h2>
+            <p className="text-xs text-[var(--color-text-muted)] mt-1">Upload a patient dental X-Ray, crop the specific tooth area, and request an AI check.</p>
+          </div>
+
+          {/* Interactive Crop Dashboard */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left side: Upload and Interactive Cropper */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-[var(--color-text)] uppercase tracking-wider">X-Ray Input</span>
+                <label className="flex items-center gap-1 text-xs px-2.5 h-8 rounded border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-bold transition-colors cursor-pointer">
+                  <ImageIcon size={12} />
+                  Choose X-Ray Image
+                  <input type="file" accept="image/*" onChange={handleXrayChange} className="hidden" />
+                </label>
+              </div>
+
+              {xrayPreview ? (
+                <div className="space-y-3">
+                  <p className="text-[10px] text-[var(--color-text-muted)] flex items-center gap-1">
+                    <Scissors size={10} /> Drag the blue box to crop a single tooth area from the X-Ray before analysis.
+                  </p>
+                  
+                  {/* Cropper Container */}
+                  <div
+                    ref={containerRef}
+                    className="relative border border-[var(--color-border)] rounded-xl bg-slate-900 overflow-hidden mx-auto select-none"
+                    style={{ maxWidth: '400px', height: '300px' }}
+                  >
+                    <img
+                      id="xray-img-source"
+                      src={xrayPreview}
+                      alt="Dental X-Ray source"
+                      className="w-full h-full object-contain pointer-events-none"
+                    />
+                    
+                    {/* Draggable Crop Rectangle Overlay */}
+                    <div
+                      onMouseDown={startDrag}
+                      className="absolute border-2 border-dashed border-indigo-500 bg-indigo-300/30 cursor-move flex items-center justify-center"
+                      style={{
+                        left: `${cropBox.x}%`,
+                        top: `${cropBox.y}%`,
+                        width: `${cropBox.width}%`,
+                        height: `${cropBox.height}%`,
+                      }}
+                    >
+                      <span className="bg-indigo-600 text-white font-bold text-[9px] px-1 py-0.5 rounded shadow">
+                        Tooth Crop
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleCropAndAnalyze}
+                    disabled={analyzing}
+                    className="w-full flex items-center justify-center gap-2 h-9 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold disabled:opacity-60 cursor-pointer transition-colors shadow"
+                  >
+                    {analyzing ? 'AI Analyzing Crop...' : 'Crop & Run AI Analysis'}
+                  </button>
+                </div>
+              ) : (
+                <div className="border-2 border-dashed border-[var(--color-border)] rounded-xl p-10 text-center bg-[var(--color-bg)] flex flex-col items-center justify-center">
+                  <ImageIcon size={40} className="text-[var(--color-text-subtle)] mb-2" />
+                  <p className="text-sm font-medium text-[var(--color-text)]">No X-Ray image uploaded yet</p>
+                  <p className="text-xs text-[var(--color-text-subtle)] mt-1">Select an X-ray image to start the crop tool.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Right side: AI Report output */}
+            <div className="space-y-4">
+              <span className="text-xs font-semibold text-[var(--color-text)] uppercase tracking-wider block">Analysis Output</span>
+              
+              {aiReport ? (
+                <div className="card p-5 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-4">
+                  <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
+                    <div>
+                      <p className="text-xs text-indigo-700 font-semibold uppercase tracking-wider">Report generated</p>
+                      <p className="text-[10px] text-[var(--color-text-muted)] font-mono">{aiReport.id}</p>
+                    </div>
+                    <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${aiReport.result === 'Cavity' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                      {aiReport.result}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <p className="text-[10px] text-[var(--color-text-muted)] mb-0.5">Confidence Level</p>
+                      <p className="text-base font-bold text-[var(--color-text)]">{(aiReport.confidence * 100).toFixed(0)}%</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-[var(--color-text-muted)] mb-0.5">Suggested Action</p>
+                      <p className="text-base font-bold text-indigo-800">{aiReport.suggestions}</p>
+                    </div>
+                  </div>
+
+                  {/* Warning Note */}
+                  <div className="p-3 bg-amber-50 text-amber-800 text-[10px] rounded-lg border border-amber-200 font-medium">
+                    ⚠️ <strong>Notice:</strong> AI assist karto, doctor final decision gheto. AI reports are recommendation aids; the treating dentist makes the final diagnosis.
+                  </div>
+
+                  <button
+                    onClick={applyAiSuggestion}
+                    className="w-full flex items-center justify-center gap-1.5 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer transition-colors shadow"
+                  >
+                    <CheckCircle size={14} /> Accept & Apply to Clinical Record
+                  </button>
+                </div>
+              ) : (
+                <div className="card p-8 border border-[var(--color-border)] text-center flex flex-col items-center justify-center">
+                  <Sparkles size={30} className="text-indigo-400 mb-2" />
+                  <p className="text-sm font-medium text-[var(--color-text)]">Awaiting AI check</p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-1">Upload and crop a tooth area on the left to review prediction reports here.</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

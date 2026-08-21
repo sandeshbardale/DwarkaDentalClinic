@@ -1,0 +1,17 @@
+module.exports = {
+  Clinic: require('./clinic.model'),
+  User: require('./user.model'),
+  Patient: require('./patient.model'),
+  TreatmentCategory: require('./treatment-category.model'),
+  Appointment: require('./appointment.model'),
+  DoctorAvailability: require('./doctor-availability.model'),
+  ClinicalRecord: require('./clinical-record.model'),
+  DentalFinding: require('./dental-finding.model'),
+  Prescription: require('./prescription.model'),
+  Invoice: require('./invoice.model'),
+  Payment: require('./payment.model'),
+  File: require('./file.model'),
+  AiReport: require('./ai-report.model'),
+  Notification: require('./notification.model'),
+  AuditLog: require('./audit-log.model'),
+};

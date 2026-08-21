@@ -1,10 +1,6 @@
 import { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { setPatients } from '../../app/store';
-import { setAppointments } from '../../app/store';
-import { setNotifications } from '../../app/store';
-import { MOCK_PATIENTS } from '../../data/patients';
-import { MOCK_APPOINTMENTS } from '../../data/appointments';
+import { fetchPatientsList, fetchAppointmentsList } from '../../app/store';
 import { MOCK_NOTIFICATIONS } from '../../data/notifications';
 import { ADMIN_DASHBOARD } from '../../data/dashboard';
 import { MOCK_REVENUE } from '../../data/revenue';
@@ -15,7 +11,7 @@ import {
 } from 'lucide-react';
 import { KPICard } from '../../components/ui/Card';
 import { Card, CardHeader, CardTitle } from '../../components/ui/Card';
-import { formatCurrency, formatDate } from '../../utils/formatters';
+import { formatCurrency, formatDate, today } from '../../utils/formatters';
 import { StatusBadge } from '../../components/ui/Badge';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -39,16 +35,18 @@ const COLORS = ['#0b6ba7', '#0d9c8e', '#f59e0b', '#ef4444', '#94a3b8'];
 
 export default function AdminDashboardPage() {
   const dispatch = useDispatch();
+  const appointments = useSelector(state => state.appointments.list);
+  const patients = useSelector(state => state.patients.list);
   const { kpis, patientRegistrations, appointmentTrend, appointmentStatusDistribution, doctorWorkload } = ADMIN_DASHBOARD;
 
   useEffect(() => {
-    dispatch(setPatients(MOCK_PATIENTS));
-    dispatch(setAppointments(MOCK_APPOINTMENTS));
-    dispatch(setNotifications(MOCK_NOTIFICATIONS));
+    dispatch(fetchPatientsList());
+    dispatch(fetchAppointmentsList());
   }, [dispatch]);
 
-  const todayApts = MOCK_APPOINTMENTS
-    .filter(a => a.date === '2024-08-18')
+  const todayStr = today();
+  const todayApts = appointments
+    .filter(a => a.date === todayStr)
     .slice(0, 5);
 
   return (

@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ChevronRight, ChevronLeft, CheckCircle } from 'lucide-react';
 import { useDispatch } from 'react-redux';
-import { addPatient, addToast } from '../../app/store';
+import { savePatientThunk, addToast } from '../../app/store';
 import { MOCK_DOCTORS } from '../../data/doctors';
 import Input, { Textarea } from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
-import { generateId, today } from '../../utils/formatters';
+import { today } from '../../utils/formatters';
 
 const STEPS = [
   { id: 1, label: 'Personal Information' },
@@ -81,12 +81,8 @@ export default function RegisterPatientPage() {
   async function handleSubmit() {
     if (!validateStep(3)) return;
     setLoading(true);
-    await new Promise(r => setTimeout(r, 800));
 
-    const patientId = `DWK-2024-${String(Math.floor(Math.random() * 900) + 100)}`;
-    const newPatient = {
-      id: generateId('PAT'),
-      patientId,
+    const newPatientData = {
       name: form.name,
       age: parseInt(form.age),
       gender: form.gender,
@@ -94,23 +90,37 @@ export default function RegisterPatientPage() {
       phone: form.phone,
       email: form.email,
       address: form.address,
-      emergencyContact: { name: form.emergencyName, relation: form.emergencyRelation, phone: form.emergencyPhone },
+      emergencyContact: {
+        name: form.emergencyName,
+        relation: form.emergencyRelation,
+        phone: form.emergencyPhone,
+      },
       bloodGroup: form.bloodGroup,
-      registeredAt: today(),
       assignedDoctorId: form.assignedDoctorId,
-      status: 'new',
       chiefComplaint: form.chiefComplaint,
       allergies: form.allergies,
       medicalHistory: form.medicalHistory,
-      lastVisit: null,
-      nextFollowUp: null,
-      totalVisits: 0,
+      appointmentDate: form.appointmentDate,
+      appointmentTime: form.appointmentTime,
+      appointmentType: form.appointmentType,
+      notes: form.notes,
     };
 
-    dispatch(addPatient(newPatient));
-    dispatch(addToast({ type: 'success', title: 'Patient Registered', message: `${form.name} (${patientId}) has been successfully registered.` }));
-    setLoading(false);
-    setDone(true);
+    try {
+      const response = await dispatch(savePatientThunk(newPatientData));
+      if (response && response.success) {
+        dispatch(addToast({
+          type: 'success',
+          title: 'Patient Registered',
+          message: `${form.name} (${response.patient.patientId}) has been successfully registered.`,
+        }));
+        setDone(true);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (done) {

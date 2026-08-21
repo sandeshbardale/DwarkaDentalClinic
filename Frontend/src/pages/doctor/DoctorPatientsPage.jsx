@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { MOCK_PATIENTS } from '../../data/patients';
-import { MOCK_APPOINTMENTS } from '../../data/appointments';
+import { useState, useEffect } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchPatientsList } from '../../app/store';
+import { useAuth } from '../../hooks/useAuth';
 import { StatusBadge } from '../../components/ui/Badge';
 import Avatar from '../../components/ui/Avatar';
 import { formatDate } from '../../utils/formatters';
@@ -9,10 +10,17 @@ import { Search, Users } from 'lucide-react';
 import EmptyState from '../../components/ui/EmptyState';
 
 export default function DoctorPatientsPage() {
+  const dispatch = useDispatch();
+  const { user } = useAuth();
+  const patientsList = useSelector(state => state.patients.list);
   const [search, setSearch] = useState('');
 
+  useEffect(() => {
+    dispatch(fetchPatientsList());
+  }, [dispatch]);
+
   // Only patients assigned to this doctor
-  const patients = MOCK_PATIENTS.filter(p => p.assignedDoctorId === 'DOC-001');
+  const patients = patientsList.filter(p => p.assignedDoctorId === user?.id || p.assignedDoctorId === 'DOC-001');
   const filtered = patients.filter(p =>
     !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.patientId.toLowerCase().includes(search.toLowerCase())
   );
