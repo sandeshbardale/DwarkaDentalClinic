@@ -61,36 +61,20 @@ async function seedDefaultData() {
   return clinic;
 }
 
-/**
- * Connects to MongoDB Atlas, then seeds default data when needed.
- * Resolves with the clinic document so services can attach clinicId.
- */
 async function connectDB() {
   if (!config.MONGODB_URI) {
     throw new Error('MONGODB_URI is not configured. Add it to Backend/.env.');
   }
 
-  let timeoutId;
   try {
-    const pendingConnection = mongoose.connect(config.MONGODB_URI, {
-      serverSelectionTimeoutMS: 10_000,
-      connectTimeoutMS: 10_000,
+    const connection = await mongoose.connect(config.MONGODB_URI, {
+      family: 4,
+      serverSelectionTimeoutMS: 15000,
+      connectTimeoutMS: 15000,
     });
-    const connectionTimeout = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(new Error('MongoDB connection timed out after 12 seconds.'));
-      }, 12_000);
-    });
-    const connection = await Promise.race([pendingConnection, connectionTimeout]);
-    clearTimeout(timeoutId);
-    console.log(`[DB] MongoDB connected: ${connection.connection.host}`);
-
-    const clinic = await seedDefaultData();
-    // Attach default clinic ID to app-wide locals (accessed in services)
-    return clinic;
+    console.log(`[DB] MongoDB connected successfully: ${connection.connection.host}`);
+    return connection;
   } catch (error) {
-    clearTimeout(timeoutId);
-    mongoose.disconnect().catch(() => undefined);
     console.error('[DB] Connection failed:', error.message);
     throw error;
   }

@@ -3,10 +3,11 @@ const multer = require('multer');
 const path = require('path');
 const aiController = require('../controllers/ai.controller');
 const { UPLOAD_DIR } = require('../services/ai.service');
+const { requireRole } = require('../middleware/authMiddleware');
 
 const router = express.Router();
+// Note: authMiddleware applied in routes/index.js
 
-// ─── Multer file upload configuration ────────────────────────────────────────
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
   filename: (_req, file, cb) => {
@@ -17,21 +18,24 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
   fileFilter: (_req, file, cb) => {
-    const allowed = /jpeg|jpg|png/;
-    if (allowed.test(path.extname(file.originalname).toLowerCase()) && allowed.test(file.mimetype)) {
+    const allowedExt = /jpeg|jpg|png/;
+    const allowedMime = /image\/(jpeg|jpg|png)/;
+    if (allowedExt.test(path.extname(file.originalname).toLowerCase()) && allowedMime.test(file.mimetype)) {
       return cb(null, true);
     }
     cb(new Error('Only JPEG, JPG, or PNG X-ray images are allowed.'));
   },
 });
 
-// TODO: add authMiddleware here when auth / JWT is implemented
-
-/** POST /api/ai/upload */
-router.post('/upload', upload.single('xray'), aiController.uploadAndAnalyzeXray);
+/** POST /api/ai/upload — doctors, admin & receptionists */
+router.post('/upload', requireRole('doctor', 'admin', 'receptionist'), upload.single('xray'), aiController.uploadAndAnalyzeXray);
 
 /** GET /api/ai/reports/:patientId */
 router.get('/reports/:patientId', aiController.getAiReportsByPatient);
+
+/** PATCH /api/ai/reports/:id/review — doctors only */
+router.patch('/reports/:id/review', requireRole('doctor', 'admin'), aiController.reviewAiReport);
 
 module.exports = router;

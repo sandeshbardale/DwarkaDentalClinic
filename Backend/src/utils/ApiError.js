@@ -30,6 +30,10 @@ class ApiError extends Error {
     return new ApiError(403, message);
   }
 
+  static unauthorized(message = 'Authentication required') {
+    return new ApiError(401, message);
+  }
+
   static internal(message = 'Internal server error') {
     return new ApiError(500, message);
   }

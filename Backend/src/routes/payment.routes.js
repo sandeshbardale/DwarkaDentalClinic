@@ -1,18 +1,14 @@
 const express = require('express');
 const paymentController = require('../controllers/payment.controller');
 const validateRequest = require('../middleware/validateRequest');
+const { requireRole } = require('../middleware/authMiddleware');
 
 const router = express.Router();
+// Note: authMiddleware applied in routes/index.js
 
-// TODO: add authMiddleware here when auth / JWT is implemented
-
-/** GET /api/payments/summary — must appear before /:id routes */
 router.get('/summary', paymentController.getRevenueSummary);
-
-/** GET /api/payments */
+router.get('/patient/:patientId', paymentController.getByPatient);
 router.get('/', paymentController.getPayments);
-
-/** POST /api/payments */
 router.post(
   '/',
   validateRequest({
@@ -22,8 +18,6 @@ router.post(
   }),
   paymentController.addPayment,
 );
-
-/** DELETE /api/payments/:id — soft-delete (Admin only) */
-router.delete('/:id', paymentController.softDeletePayment);
+router.delete('/:id', requireRole('admin'), paymentController.softDeletePayment);
 
 module.exports = router;

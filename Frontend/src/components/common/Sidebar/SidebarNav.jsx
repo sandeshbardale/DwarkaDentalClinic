@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Calendar, UserCheck, UserCog,
   DollarSign, BarChart2, Bell, Settings, Stethoscope,
-  ClipboardList, History, User, UserPlus, ChevronRight,
+  ClipboardList, History, User, UserPlus, ChevronRight, Tag, Brain,
 } from 'lucide-react';
 import { useSelector } from 'react-redux';
 
@@ -11,6 +11,7 @@ const NAV_ITEMS = {
     { label: 'Dashboard', to: '/admin', icon: LayoutDashboard, end: true },
     { label: 'Patients', to: '/admin/patients', icon: Users },
     { label: 'Appointments', to: '/admin/appointments', icon: Calendar },
+    { label: 'Categories', to: '/admin/categories', icon: Tag },
     { label: 'Doctors', to: '/admin/doctors', icon: Stethoscope },
     { label: 'Staff', to: '/admin/staff', icon: UserCog },
     { label: 'Revenue', to: '/admin/revenue', icon: DollarSign },
@@ -22,6 +23,7 @@ const NAV_ITEMS = {
     { label: 'Dashboard', to: '/doctor', icon: LayoutDashboard, end: true },
     { label: "Today's Appointments", to: '/doctor/appointments', icon: Calendar },
     { label: 'Patients', to: '/doctor/patients', icon: Users },
+    { label: 'AI X-ray', to: '/doctor/ai-xray', icon: Brain },
     { label: 'Follow-ups', to: '/doctor/follow-ups', icon: ClipboardList },
     { label: 'Clinical History', to: '/doctor/history', icon: History },
     { label: 'Notifications', to: '/doctor/notifications', icon: Bell },
@@ -30,8 +32,10 @@ const NAV_ITEMS = {
   receptionist: [
     { label: 'Dashboard', to: '/receptionist', icon: LayoutDashboard, end: true },
     { label: 'Patients', to: '/receptionist/patients', icon: Users },
-    { label: 'Register Patient', to: '/receptionist/patients/new', icon: UserPlus },
     { label: 'Appointments', to: '/receptionist/appointments', icon: Calendar },
+    { label: 'Payments', to: '/receptionist/payments', icon: DollarSign },
+    { label: 'AI X-ray', to: '/receptionist/ai-xray', icon: Brain },
+    { label: 'Register Patient', to: '/receptionist/patients/new', icon: UserPlus },
     { label: 'Follow-ups', to: '/receptionist/follow-ups', icon: ClipboardList },
     { label: 'Notifications', to: '/receptionist/notifications', icon: Bell },
     { label: 'Profile', to: '/receptionist/profile', icon: User },

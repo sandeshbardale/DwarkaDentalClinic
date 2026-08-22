@@ -4,29 +4,100 @@ const User = require('../models/user.model');
 const Clinic = require('../models/clinic.model');
 const ApiError = require('../utils/ApiError');
 
-/**
- * Returns the single clinic document from the database.
- * All operations attach clinicId from this document.
- */
 async function getDefaultClinic() {
-  const clinic = await Clinic.findOne({});
-  if (!clinic) throw ApiError.internal('Clinic not found. Run the server to seed default data.');
+  let clinic = await Clinic.findOne({});
+  if (!clinic) {
+    clinic = await Clinic.create({
+      name: 'Dwarka Dental Clinic',
+      email: 'info@dwarkadental.com',
+      phone: '+91 98765 00000',
+      address: { street: 'Sector 12', city: 'Dwarka, New Delhi', state: 'Delhi', zipCode: '110075' }
+    });
+  }
   return clinic;
 }
 
 /**
- * Fetch all non-deleted patients, serialized for the frontend.
- * Converts Mongoose docs to plain objects with frontend-compatible field names.
+ * Fetch patients with search / filter / sort / pagination.
+ * @param {object} query  { search, status, doctorId, sortBy, sortOrder, page, limit }
+ * @returns {{ data: object[], pagination: object }}
  */
-async function getAllPatients() {
-  const patients = await Patient.find({ isDeleted: false }).sort({ registeredAt: -1 }).lean();
-  return patients.map(toFrontendShape);
+ async function getAllPatients(query = {}) {
+  const {
+    search = '',
+    status,
+    doctorId,
+    categoryId,
+    sortBy = 'registeredAt',
+    sortOrder = 'desc',
+    page = 1,
+    limit = 20,
+  } = query;
+
+  const filter = { isDeleted: false };
+
+  if (search) {
+    filter.$or = [
+      { name: { $regex: search, $options: 'i' } },
+      { phone: { $regex: search, $options: 'i' } },
+      { patientNumber: { $regex: search, $options: 'i' } },
+    ];
+  }
+  if (status) filter.status = status;
+
+  const mongoose = require('mongoose');
+  if (doctorId && mongoose.Types.ObjectId.isValid(doctorId)) {
+    filter.assignedDoctorId = new mongoose.Types.ObjectId(doctorId);
+  }
+
+  if (categoryId && mongoose.Types.ObjectId.isValid(categoryId)) {
+    const matchingApts = await Appointment.find({
+      treatmentCategoryId: new mongoose.Types.ObjectId(categoryId),
+      isDeleted: false,
+    }).distinct('patientId');
+    filter._id = { $in: matchingApts };
+  }
+
+  const sortMap = {
+    name: 'name',
+    registeredAt: 'registeredAt',
+    lastVisit: 'lastVisitAt',
+    nextFollowUp: 'nextFollowUpAt',
+  };
+  const sortField = sortMap[sortBy] || 'registeredAt';
+  const sortDir = sortOrder === 'asc' ? 1 : -1;
+
+  const pageNum = Math.max(1, parseInt(page));
+  const pageLimit = Math.min(100, Math.max(1, parseInt(limit)));
+  const skip = (pageNum - 1) * pageLimit;
+
+  const [patients, total] = await Promise.all([
+    Patient.find(filter).sort({ [sortField]: sortDir }).skip(skip).limit(pageLimit).lean(),
+    Patient.countDocuments(filter),
+  ]);
+
+  return {
+    data: patients.map(toFrontendShape),
+    pagination: {
+      page: pageNum,
+      limit: pageLimit,
+      total,
+      totalPages: Math.ceil(total / pageLimit),
+    },
+  };
+}
+
+/**
+ * Get a single patient by ID.
+ */
+async function getPatientById(id) {
+  const patient = await Patient.findById(id).lean();
+  if (!patient || patient.isDeleted) throw ApiError.notFound('Patient not found.');
+  return toFrontendShape(patient);
 }
 
 /**
  * Register a new patient (and optionally create their first appointment).
- * @param {object} body  POST request body from RegisterPatientPage
- * @returns {{ patient: object, appointment: object|null }}
  */
 async function createPatient(body) {
   const clinic = await getDefaultClinic();
@@ -35,23 +106,20 @@ async function createPatient(body) {
     name, age, dob, gender, phone, email, address,
     emergencyContact, bloodGroup, assignedDoctorId,
     chiefComplaint, allergies, medicalHistory,
-    appointmentDate, appointmentTime, appointmentType, notes,
+    appointmentDate, appointmentTime, appointmentType,
+    treatmentCategoryId, notes,
   } = body;
 
-  // Auto-generate a sequential patientNumber (DWK-2026-XXXX)
   const count = await Patient.countDocuments({ clinicId: clinic._id });
   const patientNumber = `DWK-2026-${String(count + 1).padStart(4, '0')}`;
 
-  // allergies may come as a plain string from the form; store as an array
   const allergiesArr = typeof allergies === 'string'
     ? allergies.split(',').map((a) => a.trim()).filter(Boolean)
     : (allergies || []);
 
-  // Guard: only use assignedDoctorId if it looks like a valid MongoDB ObjectId (24 hex chars)
   const mongoose = require('mongoose');
   const validDoctorId = assignedDoctorId && mongoose.Types.ObjectId.isValid(assignedDoctorId)
-    ? assignedDoctorId
-    : undefined;
+    ? assignedDoctorId : undefined;
 
   const patient = await Patient.create({
     clinicId: clinic._id,
@@ -66,7 +134,7 @@ async function createPatient(body) {
     bloodGroup,
     chiefComplaint,
     medicalHistory,
-    allergies: allergiesArr.length ? allergiesArr : [],
+    allergies: allergiesArr,
     assignedDoctorId: validDoctorId,
     status: 'new',
     registeredAt: new Date(),
@@ -75,26 +143,26 @@ async function createPatient(body) {
 
   let initialApt = null;
   if (appointmentDate && appointmentTime && validDoctorId) {
-    const doctor = await User.findById(validDoctorId);
-    const doctorName = doctor ? doctor.name : 'Dr. General Dentist';
     const count2 = await Appointment.countDocuments({ clinicId: clinic._id });
     const appointmentNumber = `APT-2026-${String(count2 + 1).padStart(4, '0')}`;
-
     const startAt = new Date(`${appointmentDate}T${appointmentTime}`);
-    const endAt = new Date(startAt.getTime() + 30 * 60 * 1000); // 30-min default
+    const endAt = new Date(startAt.getTime() + 30 * 60 * 1000);
+
+    const validCatId = treatmentCategoryId && mongoose.Types.ObjectId.isValid(treatmentCategoryId)
+      ? treatmentCategoryId : undefined;
 
     initialApt = await Appointment.create({
       clinicId: clinic._id,
       appointmentNumber,
       patientId: patient._id,
       doctorId: validDoctorId,
-      treatmentCategoryId: undefined,
+      treatmentCategoryId: validCatId,
       startAt,
       endAt,
       durationMinutes: 30,
       status: 'scheduled',
       notes: notes || '',
-      createdById: validDoctorId, // Use doctor as creator stub until auth provides userId
+      createdById: validDoctorId,
     });
   }
 
@@ -106,21 +174,19 @@ async function createPatient(body) {
 
 /**
  * Update editable patient fields.
- * @param {string} id     Mongoose _id string
- * @param {object} body   Fields to update
  */
 async function updatePatient(id, body) {
   const patient = await Patient.findById(id);
   if (!patient || patient.isDeleted) throw ApiError.notFound('Patient not found.');
 
-  const allowedFields = [
+  const allowed = [
     'name', 'phone', 'email', 'address', 'gender', 'bloodGroup',
     'chiefComplaint', 'medicalHistory', 'allergies', 'assignedDoctorId',
     'status', 'lastVisitAt', 'nextFollowUpAt', 'totalVisits',
-    'emergencyContact',
+    'emergencyContact', 'dateOfBirth',
   ];
 
-  for (const field of allowedFields) {
+  for (const field of allowed) {
     if (body[field] !== undefined) {
       patient[field] = body[field];
     }
@@ -131,7 +197,6 @@ async function updatePatient(id, body) {
 
 /**
  * Soft-delete a patient (Admin only).
- * @param {string} id  Mongoose _id string
  */
 async function softDeletePatient(id) {
   const patient = await Patient.findById(id);
@@ -142,16 +207,8 @@ async function softDeletePatient(id) {
 
 // ─── Shape helpers ────────────────────────────────────────────────────────────
 
-/**
- * Map a Mongoose Patient document to the flat shape the frontend expects.
- * The current frontend pages access: id, patientId, name, age, phone, email,
- * address, gender, bloodGroup, status, assignedDoctorId, lastVisit,
- * nextFollowUp, totalVisits, chiefComplaint, allergies, medicalHistory,
- * emergencyContact, registeredAt.
- */
 function toFrontendShape(p) {
   return {
-    // _id → id for frontend key usage
     id: p._id.toString(),
     patientId: p.patientNumber,
     name: p.name,
@@ -192,6 +249,7 @@ function toFrontendAppointment(a) {
 
 module.exports = {
   getAllPatients,
+  getPatientById,
   createPatient,
   updatePatient,
   softDeletePatient,

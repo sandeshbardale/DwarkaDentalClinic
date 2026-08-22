@@ -1,27 +1,25 @@
 /**
  * Redux store — modular configuration.
- *
- * Server state (data fetching, caching) → RTK Query via apiSlice (src/services/apiSlice.js)
- * Client state (auth, UI, feature data) → individual slices below
+ * JWT token is stored alongside session in localStorage and sent via Authorization header.
  */
 import { configureStore, createSlice } from '@reduxjs/toolkit';
 import { apiSlice } from '../services/apiSlice';
 import patientsReducer, { setPatientsList } from '../features/patients/patientsSlice';
 import appointmentsReducer, { setAppointmentsList } from '../features/appointments/appointmentsSlice';
 
-// Import feature API definitions so their endpoints are registered when the store loads
 import '../features/patients/patientsApi';
 import '../features/appointments/appointmentsApi';
 
+const SESSION_KEY = 'ddc:session';
+
 // ─── Session Rehydration ──────────────────────────────────────────────────────
-// Restore auth state from localStorage so page refresh doesn't log the user out.
 function loadSessionFromStorage() {
   try {
-    const raw = localStorage.getItem('ddc:session');
+    const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const session = JSON.parse(raw);
-    if (session && session.user && session.role) {
-      return { user: session.user, role: session.role, isAuthenticated: true, isLoading: false, error: null };
+    if (session?.user && session?.role) {
+      return { user: session.user, role: session.role, token: session.token || null, isAuthenticated: true, isLoading: false, error: null };
     }
   } catch (_) {}
   return null;
@@ -29,37 +27,24 @@ function loadSessionFromStorage() {
 
 const savedSession = loadSessionFromStorage();
 
+// ─── Auth Slice ───────────────────────────────────────────────────────────────
 const authSlice = createSlice({
   name: 'auth',
-  initialState: savedSession || {
-    user: null,
-    role: null,
-    isAuthenticated: false,
-    isLoading: false,
-    error: null,
-  },
+  initialState: savedSession || { user: null, role: null, token: null, isAuthenticated: false, isLoading: false, error: null },
   reducers: {
-    loginStart(state) {
-      state.isLoading = true;
-      state.error = null;
-    },
+    loginStart(state) { state.isLoading = true; state.error = null; },
     loginSuccess(state, action) {
       state.user = action.payload.user;
       state.role = action.payload.role;
+      state.token = action.payload.token || null;
       state.isAuthenticated = true;
       state.isLoading = false;
       state.error = null;
     },
-    loginFailure(state, action) {
-      state.isLoading = false;
-      state.error = action.payload;
-    },
+    loginFailure(state, action) { state.isLoading = false; state.error = action.payload; },
     logout(state) {
-      state.user = null;
-      state.role = null;
-      state.isAuthenticated = false;
-      state.isLoading = false;
-      state.error = null;
+      state.user = null; state.role = null; state.token = null;
+      state.isAuthenticated = false; state.isLoading = false; state.error = null;
     },
   },
 });
@@ -67,31 +52,15 @@ const authSlice = createSlice({
 // ─── UI Slice ──────────────────────────────────────────────────────────────────
 const uiSlice = createSlice({
   name: 'ui',
-  initialState: {
-    sidebarCollapsed: false,
-    sidebarMobileOpen: false,
-    toasts: [],
-    activeModal: null,
-    modalData: null,
-  },
+  initialState: { sidebarCollapsed: false, sidebarMobileOpen: false, toasts: [], activeModal: null, modalData: null },
   reducers: {
     toggleSidebar(state) { state.sidebarCollapsed = !state.sidebarCollapsed; },
     toggleMobileSidebar(state) { state.sidebarMobileOpen = !state.sidebarMobileOpen; },
     closeMobileSidebar(state) { state.sidebarMobileOpen = false; },
-    addToast(state, action) {
-      state.toasts.push({ id: Date.now(), ...action.payload });
-    },
-    removeToast(state, action) {
-      state.toasts = state.toasts.filter((t) => t.id !== action.payload);
-    },
-    openModal(state, action) {
-      state.activeModal = action.payload.modal;
-      state.modalData = action.payload.data || null;
-    },
-    closeModal(state) {
-      state.activeModal = null;
-      state.modalData = null;
-    },
+    addToast(state, action) { state.toasts.push({ id: Date.now(), ...action.payload }); },
+    removeToast(state, action) { state.toasts = state.toasts.filter((t) => t.id !== action.payload); },
+    openModal(state, action) { state.activeModal = action.payload.modal; state.modalData = action.payload.data || null; },
+    closeModal(state) { state.activeModal = null; state.modalData = null; },
   },
 });
 
@@ -101,13 +70,8 @@ const notificationSlice = createSlice({
   initialState: { list: [] },
   reducers: {
     setNotifications(state, action) { state.list = action.payload; },
-    markAsRead(state, action) {
-      const n = state.list.find((x) => x.id === action.payload);
-      if (n) n.read = true;
-    },
-    markAllAsRead(state) {
-      state.list.forEach((n) => { n.read = true; });
-    },
+    markAsRead(state, action) { const n = state.list.find((x) => x.id === action.payload); if (n) n.read = true; },
+    markAllAsRead(state) { state.list.forEach((n) => { n.read = true; }); },
   },
 });
 
@@ -121,43 +85,48 @@ const store = configureStore({
     appointments: appointmentsReducer,
     notifications: notificationSlice.reducer,
   },
-  middleware: (getDefaultMiddleware) =>
-    getDefaultMiddleware().concat(apiSlice.middleware),
+  middleware: (getDefaultMiddleware) => getDefaultMiddleware().concat(apiSlice.middleware),
 });
 
 // ─── Action Exports ───────────────────────────────────────────────────────────
 export const { loginStart, loginSuccess, loginFailure, logout } = authSlice.actions;
-export const {
-  toggleSidebar, toggleMobileSidebar, closeMobileSidebar,
-  addToast, removeToast, openModal, closeModal,
-} = uiSlice.actions;
+export const { toggleSidebar, toggleMobileSidebar, closeMobileSidebar, addToast, removeToast, openModal, closeModal } = uiSlice.actions;
 export const { setNotifications, markAsRead, markAllAsRead } = notificationSlice.actions;
 
-// ─── Compat Thunks ─────────────────────────────────────────────────────────────
-// These thunks fetch data from the backend and populate the slice list fields.
-// The API now returns JSON arrays directly (no wrapper), so we use the response as-is.
-// Pages can be incrementally migrated to RTK Query hooks (useGetPatientsQuery etc.)
-// once this compat layer is no longer needed.
-
-export const fetchPatientsList = () => async (dispatch) => {
+// ─── Authenticated fetch helper (used by thunks) ─────────────────────────────
+function authFetch(endpoint, options = {}) {
   try {
-    const res = await fetch('/api/patients');
+    const raw = localStorage.getItem(SESSION_KEY);
+    const token = raw ? JSON.parse(raw)?.token : null;
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return fetch(`/api${endpoint}`, { ...options, headers });
+  } catch {
+    return fetch(`/api${endpoint}`, options);
+  }
+}
+
+// ─── Compat Thunks ─────────────────────────────────────────────────────────────
+export const fetchPatientsList = (params = {}) => async (dispatch) => {
+  try {
+    const q = new URLSearchParams(params).toString();
+    const res = await authFetch(`/patients${q ? '?' + q : ''}`);
     const json = await res.json();
-    // json is either a plain array or { success, message, data }
-    const list = Array.isArray(json) ? json : (json.data ?? []);
-    dispatch(setPatientsList(list));
+    const list = Array.isArray(json) ? json : (json.data?.data ?? json.data ?? []);
+    dispatch(setPatientsList(Array.isArray(list) ? list : []));
   } catch (err) {
     console.error('fetchPatientsList thunk failed:', err);
     dispatch(setPatientsList([]));
   }
 };
 
-export const fetchAppointmentsList = () => async (dispatch) => {
+export const fetchAppointmentsList = (params = {}) => async (dispatch) => {
   try {
-    const res = await fetch('/api/appointments');
+    const q = new URLSearchParams(params).toString();
+    const res = await authFetch(`/appointments${q ? '?' + q : ''}`);
     const json = await res.json();
-    const list = Array.isArray(json) ? json : (json.data ?? []);
-    dispatch(setAppointmentsList(list));
+    const list = Array.isArray(json) ? json : (json.data?.data ?? json.data ?? []);
+    dispatch(setAppointmentsList(Array.isArray(list) ? list : []));
   } catch (err) {
     console.error('fetchAppointmentsList thunk failed:', err);
     dispatch(setAppointmentsList([]));
@@ -165,23 +134,20 @@ export const fetchAppointmentsList = () => async (dispatch) => {
 };
 
 export const savePatientThunk = (patientData) => async (dispatch) => {
-  const res = await fetch('/api/patients', {
+  const res = await authFetch('/patients', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patientData),
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.message || 'Failed to register patient.');
-  // Refresh the list after creation
   dispatch(fetchPatientsList());
   dispatch(apiSlice.util.invalidateTags(['Patient']));
   return json;
 };
 
 export const bookAppointmentThunk = (aptData) => async (dispatch) => {
-  const res = await fetch('/api/appointments', {
+  const res = await authFetch('/appointments', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(aptData),
   });
   const json = await res.json();
@@ -191,28 +157,26 @@ export const bookAppointmentThunk = (aptData) => async (dispatch) => {
   return json;
 };
 
-export const updateAppointmentStatusThunk =
-  (id, status, nextDate, nextTime, notes) => async (dispatch) => {
-    const res = await fetch(`/api/appointments/${id}/status`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, nextDate, nextTime, notes }),
-    });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.message || 'Failed to update appointment.');
-    dispatch(fetchAppointmentsList());
-    dispatch(apiSlice.util.invalidateTags(['Appointment', 'Patient']));
-    return json;
-  };
+export const updateAppointmentStatusThunk = (id, status, nextDate, nextTime, notes) => async (dispatch) => {
+  const res = await authFetch(`/appointments/${id}/status`, {
+    method: 'PUT',
+    body: JSON.stringify({ status, nextDate, nextTime, notes }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.message || 'Failed to update appointment.');
+  dispatch(fetchAppointmentsList());
+  dispatch(apiSlice.util.invalidateTags(['Appointment', 'Patient']));
+  return json;
+};
 
-// Legacy no-op action creators (kept so existing imports don't break)
+// Legacy no-op shims (keep so existing imports don't break)
 export const addPatient = () => ({});
 export const updatePatient = () => ({});
 export const addAppointment = () => ({});
 export const updateAppointment = () => ({});
 export const setPatients = () => ({});
 export const setAppointments = () => ({});
-export const setSearchQuery = (q) => setPatientsList; // no-op shim
-export const setFilterStatus = (s) => ({}); // no-op shim
+export const setSearchQuery = () => ({});
+export const setFilterStatus = () => ({});
 
 export default store;

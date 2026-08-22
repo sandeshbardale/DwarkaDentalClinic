@@ -6,7 +6,7 @@ import { useNotifications } from '../../hooks/useNotifications';
 import Avatar from '../ui/Avatar';
 import { useAuth } from '../../hooks/useAuth';
 import NotificationPanel from './NotificationPanel';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 
 /** Derives a page title from the current route path. */
 function usePageTitle() {
@@ -28,8 +28,24 @@ export default function Header() {
   const [notifOpen, setNotifOpen] = useState(false);
   const pageTitle = usePageTitle();
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const searchQuery = searchParams.get('q') || '';
+
+  function handleSearchChange(e) {
+    const val = e.target.value;
+    if (val) {
+      setSearchParams({ q: val }, { replace: true });
+    } else {
+      setSearchParams({}, { replace: true });
+    }
+  }
+
+  function handleClearSearch() {
+    setSearchParams({}, { replace: true });
+  }
+
   return (
-    <header className="sticky top-0 z-20 h-14 flex items-center gap-4 px-6 bg-white border-b border-[var(--color-border)]">
+    <header className="sticky top-0 z-20 h-14 flex items-center gap-4 px-6 bg-white border-b border-[var(--color-border)] shadow-2xs">
       {/* Mobile menu toggle */}
       <button
         onClick={() => dispatch(toggleMobileSidebar())}
@@ -44,10 +60,25 @@ export default function Header() {
 
       <div className="flex-1" />
 
-      {/* Search hint */}
-      <div className="hidden lg:flex items-center gap-2 px-3 h-8 rounded-lg bg-[var(--color-bg)] border border-[var(--color-border)] text-sm text-[var(--color-text-muted)] cursor-text min-w-48">
-        <Search size={14} aria-hidden="true" />
-        <span>Search…</span>
+      {/* Real Interactive Top Header Search Bar */}
+      <div className="flex items-center gap-2 px-3.5 h-9 rounded-xl bg-slate-100 border border-slate-200 text-xs text-slate-700 min-w-[240px] focus-within:ring-2 focus-within:ring-[var(--color-primary-500)] focus-within:bg-white transition-all">
+        <Search size={15} className="text-slate-400 flex-shrink-0" />
+        <input
+          type="text"
+          placeholder="Search patient name, phone, doctor..."
+          value={searchQuery}
+          onChange={handleSearchChange}
+          className="bg-transparent border-none outline-none text-xs w-full text-slate-900 placeholder:text-slate-400 font-medium"
+        />
+        {searchQuery && (
+          <button
+            onClick={handleClearSearch}
+            className="text-xs font-bold text-slate-400 hover:text-slate-600 cursor-pointer"
+            title="Clear search"
+          >
+            ✕
+          </button>
+        )}
       </div>
 
       {/* Notifications */}

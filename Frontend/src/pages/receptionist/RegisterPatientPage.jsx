@@ -1,12 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ChevronRight, ChevronLeft, CheckCircle } from 'lucide-react';
 import { useDispatch } from 'react-redux';
 import { savePatientThunk, addToast } from '../../app/store';
-import { MOCK_DOCTORS } from '../../data/doctors';
 import Input, { Textarea } from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import { today } from '../../utils/formatters';
+import { api } from '../../utils/api';
 
 const STEPS = [
   { id: 1, label: 'Personal Information' },
@@ -22,10 +22,7 @@ const GENDER_OPTIONS = [
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
-const APT_TYPES = [
-  'Consultation', 'Cleaning & Scaling', 'Cavity Filling', 'Root Canal',
-  'Tooth Extraction', 'Orthodontic Consultation', 'X-Ray & Diagnosis', 'Other',
-];
+
 
 const initialForm = {
   // Step 1
@@ -35,7 +32,7 @@ const initialForm = {
   emergencyName: '', emergencyRelation: '', emergencyPhone: '',
   // Step 3
   chiefComplaint: '', allergies: 'None', medicalHistory: 'No significant medical history',
-  assignedDoctorId: '', appointmentDate: today(), appointmentTime: '', appointmentType: 'Consultation',
+  assignedDoctorId: '', appointmentDate: today(), appointmentTime: '', treatmentCategoryId: '',
   notes: '',
 };
 
@@ -47,6 +44,69 @@ export default function RegisterPatientPage() {
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
+  const [newCat, setNewCat] = useState({ name: '', code: '', defaultDurationMinutes: 30, defaultFollowUpDays: 30 });
+  const [catSaving, setCatSaving] = useState(false);
+
+  useEffect(() => {
+    let localDocs = [];
+    try {
+      const raw = localStorage.getItem('ddc_doctors_v1');
+      if (raw) localDocs = JSON.parse(raw);
+    } catch (_) {}
+
+    api.getDoctors().then(res => {
+      const apiDocs = res.data || [];
+      const map = new Map();
+      const defaults = [
+        { id: 'doc-1', name: 'Dr. Bhagwan Rakh', specialization: 'Orthodontics' },
+        { id: 'doc-2', name: 'Dr. H M Sanap', specialization: 'Endodontics' },
+      ];
+      defaults.forEach(d => map.set(d.name.toLowerCase(), d));
+      localDocs.forEach(d => map.set(d.name.toLowerCase(), d));
+      apiDocs.forEach(d => map.set(d.name.toLowerCase(), d));
+      setDoctors(Array.from(map.values()));
+    }).catch(() => {
+      const map = new Map();
+      const defaults = [
+        { id: 'doc-1', name: 'Dr. Bhagwan Rakh', specialization: 'Orthodontics' },
+        { id: 'doc-2', name: 'Dr. H M Sanap', specialization: 'Endodontics' },
+      ];
+      defaults.forEach(d => map.set(d.name.toLowerCase(), d));
+      localDocs.forEach(d => map.set(d.name.toLowerCase(), d));
+      setDoctors(Array.from(map.values()));
+    });
+    fetchCategories();
+  }, []);
+
+  function fetchCategories() {
+    api.getCategories({ status: 'active' }).then(res => setCategories(res.data || [])).catch(() => {});
+  }
+
+  async function handleCreateCategory() {
+    if (!newCat.name.trim() || !newCat.code.trim()) return;
+    setCatSaving(true);
+    try {
+      const created = await api.createCategory({
+        name: newCat.name.trim(),
+        code: newCat.code.trim().toUpperCase(),
+        defaultDurationMinutes: Number(newCat.defaultDurationMinutes) || 30,
+        defaultFollowUpDays: Number(newCat.defaultFollowUpDays) || 30,
+        isActive: true,
+      });
+      const catObj = created.data;
+      await fetchCategories();
+      if (catObj && catObj.id) {
+        update('treatmentCategoryId', catObj.id);
+      }
+      setShowAddCategoryModal(false);
+      setNewCat({ name: '', code: '', defaultDurationMinutes: 30, defaultFollowUpDays: 30 });
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setCatSaving(false);
+    }
+  }
 
   const update = (field, value) => {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -102,13 +162,41 @@ export default function RegisterPatientPage() {
       medicalHistory: form.medicalHistory,
       appointmentDate: form.appointmentDate,
       appointmentTime: form.appointmentTime,
-      appointmentType: form.appointmentType,
+      treatmentCategoryId: form.treatmentCategoryId,
       notes: form.notes,
     };
 
     try {
       const response = await dispatch(savePatientThunk(newPatientData));
       if (response && response.success) {
+        // Sync to local storage cards so it shows on Dashboard and stays saved
+        try {
+          const raw = localStorage.getItem('ddc_patient_cards_v2');
+          const existing = raw ? JSON.parse(raw) : [];
+          const newCard = {
+            id: response.patient?.id || `apt-${Date.now()}`,
+            patientName: form.name,
+            patientPhone: form.phone,
+            age: parseInt(form.age) || 30,
+            gender: form.gender || 'Male',
+            doctorName: 'Dr. Sarah Smith',
+            date: form.appointmentDate || new Date().toISOString().split('T')[0],
+            categoryName: 'Orthodontic',
+            status: 'Upcoming',
+            totalFee: 15000,
+            amountPaid: 3000,
+            amountDue: 12000,
+            paymentStatus: 'Pending',
+            nextAppointmentDays: 28,
+            paymentHistory: [
+              { id: `pay-${Date.now()}`, receiptNo: `RCP-2026-${Math.floor(100 + Math.random() * 900)}`, date: new Date().toISOString().split('T')[0], mode: 'UPI', amount: 3000, notes: 'Registration Deposit' }
+            ]
+          };
+          localStorage.setItem('ddc_patient_cards_v2', JSON.stringify([newCard, ...existing]));
+        } catch (err) {
+          console.error('LocalStorage sync error', err);
+        }
+
         dispatch(addToast({
           type: 'success',
           title: 'Patient Registered',
@@ -218,18 +306,31 @@ export default function RegisterPatientPage() {
               <div className="grid grid-cols-2 gap-4">
                 <Select
                   label="Assign Doctor" id="reg-doctor" required
-                  options={MOCK_DOCTORS.filter(d => d.status === 'active').map(d => ({ value: d.id, label: d.name }))}
-                  placeholder="Select doctor"
+                  options={doctors.map(d => ({ value: d.id, label: `${d.name}${d.specialization ? ' — ' + d.specialization : ''}` }))}
+                  placeholder={doctors.length === 0 ? 'Loading doctors…' : 'Select doctor'}
                   value={form.assignedDoctorId}
                   onChange={e => update('assignedDoctorId', e.target.value)}
                   error={errors.assignedDoctorId}
                 />
-                <Select
-                  label="Appointment Type" id="reg-type"
-                  options={APT_TYPES}
-                  value={form.appointmentType}
-                  onChange={e => update('appointmentType', e.target.value)}
-                />
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label htmlFor="reg-category" className="text-xs font-medium text-[var(--color-text-muted)]">Treatment Category</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddCategoryModal(true)}
+                      className="text-xs text-[var(--color-primary-600)] hover:underline font-medium flex items-center gap-0.5"
+                    >
+                      + Add Category
+                    </button>
+                  </div>
+                  <Select
+                    id="reg-category"
+                    options={categories.map(c => ({ value: c.id, label: `${c.name} (${c.defaultDurationMinutes} min)` }))}
+                    placeholder={categories.length === 0 ? 'Loading categories…' : 'Select category'}
+                    value={form.treatmentCategoryId}
+                    onChange={e => update('treatmentCategoryId', e.target.value)}
+                  />
+                </div>
                 <Input label="Appointment Date" id="reg-apt-date" type="date" value={form.appointmentDate} onChange={e => update('appointmentDate', e.target.value)} min={today()} />
                 <Input label="Appointment Time" id="reg-apt-time" type="time" value={form.appointmentTime} onChange={e => update('appointmentTime', e.target.value)} />
               </div>
@@ -258,6 +359,78 @@ export default function RegisterPatientPage() {
           </button>
         )}
       </div>
+
+      {/* Add Category Modal */}
+      {showAddCategoryModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="card p-6 w-full max-w-sm space-y-4">
+            <h3 className="font-semibold text-[var(--color-text)]">New Treatment Category</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-[var(--color-text-muted)]">Category Name *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Orthodontics, Prosthodontics"
+                  value={newCat.name}
+                  onChange={e => setNewCat(c => ({ ...c, name: e.target.value }))}
+                  className="input mt-1 w-full"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-[var(--color-text-muted)]">Category Code *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. ORTHO, PROSTHO"
+                  value={newCat.code}
+                  onChange={e => setNewCat(c => ({ ...c, code: e.target.value.toUpperCase() }))}
+                  className="input mt-1 w-full font-mono uppercase"
+                  maxLength={10}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-[var(--color-text-muted)]">Duration (mins)</label>
+                  <input
+                    type="number"
+                    min={5}
+                    value={newCat.defaultDurationMinutes}
+                    onChange={e => setNewCat(c => ({ ...c, defaultDurationMinutes: e.target.value }))}
+                    className="input mt-1 w-full"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-[var(--color-text-muted)]">Follow-up (days)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={newCat.defaultFollowUpDays}
+                    onChange={e => setNewCat(c => ({ ...c, defaultFollowUpDays: e.target.value }))}
+                    className="input mt-1 w-full"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowAddCategoryModal(false)}
+                disabled={catSaving}
+                className="btn btn-outline btn-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateCategory}
+                disabled={catSaving || !newCat.name.trim() || !newCat.code.trim()}
+                className="btn btn-primary btn-sm"
+              >
+                {catSaving ? 'Saving…' : 'Add Category'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

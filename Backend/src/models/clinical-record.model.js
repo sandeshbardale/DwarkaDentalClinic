@@ -12,6 +12,14 @@ const clinicalRecordSchema = new mongoose.Schema(
     treatment: { type: String, trim: true },
     clinicalNotes: { type: String, trim: true },
     prescription: { type: String }, // Stringified JSON array of prescription items
+    dentalChart: [
+      {
+        toothNumber: { type: Number, required: true },
+        status: { type: String, enum: ['healthy', 'decay', 'filled', 'crown', 'rct', 'missing'], default: 'healthy' },
+        surfaces: [{ type: String }],
+        notes: { type: String, trim: true },
+      },
+    ],
     doctorName: { type: String, trim: true }, // Denormalised for display performance
     followUpDate: Date,
     followUpInstructions: { type: String, trim: true },

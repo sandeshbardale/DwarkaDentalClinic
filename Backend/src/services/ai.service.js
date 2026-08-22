@@ -1,11 +1,21 @@
+/**
+ * AI X-Ray Analysis Service
+ *
+ * Sends the uploaded X-ray image to the ML FastAPI service (ML_SERVICE_URL).
+ * If the ML service is unavailable, returns an honest error — NEVER a fake result.
+ *
+ * Architecture:
+ *   React → Node/Express → FastAPI (Python/PyTorch) → prediction → MongoDB
+ */
 const AiReport = require('../models/ai-report.model');
 const File = require('../models/file.model');
 const Patient = require('../models/patient.model');
 const Clinic = require('../models/clinic.model');
 const ApiError = require('../utils/ApiError');
-const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const axios = require('axios');
+const FormData = require('form-data');
 
 /** Directory where uploaded X-ray images are stored. */
 const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads');
@@ -13,79 +23,91 @@ if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
+const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8000';
+
 async function getDefaultClinic() {
-  const clinic = await Clinic.findOne({});
-  if (!clinic) throw ApiError.internal('Clinic not found.');
+  let clinic = await Clinic.findOne({});
+  if (!clinic) {
+    clinic = await Clinic.create({
+      name: 'Dwarka Dental Clinic',
+      email: 'info@dwarkadental.com',
+      phone: '+91 98765 00000',
+      address: { street: 'Sector 12', city: 'Dwarka, New Delhi', state: 'Delhi', zipCode: '110075' }
+    });
+  }
   return clinic;
 }
 
 /**
- * Executes python predict.py and parses the outcome.
- * Falls back to a deterministic simulation if the Python script is unavailable.
- * @param {string} imagePath  Absolute path to the uploaded image
- * @returns {Promise<{ result: string, confidence: number, suggestions: string }>}
+ * Call the FastAPI ML service with the uploaded image.
+ * Returns null if the service is unavailable (never returns fake data).
+ *
+ * @param {string} imagePath  Absolute path to uploaded image file
+ * @returns {Promise<{ result: string, confidence: number, suggestions: string[], modelVersion: string }|null>}
  */
-function runAiPrediction(imagePath) {
-  return new Promise((resolve) => {
-    const scriptPath = path.join(UPLOAD_DIR, '..', 'predict.py');
-    exec(`python "${scriptPath}" "${imagePath}"`, (error, stdout) => {
-      if (error) {
-        console.warn('[AI] Python script not found or failed. Using simulation fallback.');
-        return resolve(getSimulatedPrediction(imagePath));
-      }
-      try {
-        const parsed = JSON.parse(stdout.trim());
-        if (parsed.status === 'success') {
-          return resolve({
-            result: parsed.result,
-            confidence: parseFloat(parsed.confidence),
-            suggestions: parsed.suggestion,
-          });
-        }
-      } catch (_) {
-        console.warn('[AI] Failed to parse AI output.');
-      }
-      resolve(getSimulatedPrediction(imagePath));
-    });
-  });
-}
+async function callMlService(imagePath) {
+  try {
+    const form = new FormData();
+    form.append('file', fs.createReadStream(imagePath));
 
-function getSimulatedPrediction(imagePath) {
-  let hash = 0;
-  const filename = path.basename(imagePath);
-  for (let i = 0; i < filename.length; i++) {
-    hash = filename.charCodeAt(i) + ((hash << 5) - hash);
+    const response = await axios.post(`${ML_SERVICE_URL}/predict`, form, {
+      headers: form.getHeaders(),
+      timeout: 30000, // 30 second timeout
+    });
+
+    const data = response.data;
+    if (!data || !data.result) {
+      throw new Error('Invalid response from ML service.');
+    }
+
+    return {
+      result: data.result,        // 'cavity' | 'normal' | 'uncertain'
+      confidence: parseFloat(data.confidence) || 0,
+      suggestions: Array.isArray(data.suggestions) ? data.suggestions : [data.suggestions || ''],
+      modelVersion: data.modelVersion || '1.0.0',
+    };
+  } catch (err) {
+    if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.response?.status >= 500) {
+      console.warn('[AI] ML service unavailable:', err.message);
+      return null; // Callers must handle null — never fake the result
+    }
+    // Propagate unexpected errors
+    throw ApiError.internal(`ML service error: ${err.message}`);
   }
-  const isCavity = Math.abs(hash) % 2 === 0;
-  const confidence = 0.75 + (Math.abs(hash) % 20) / 100;
-  if (isCavity) {
-    const opts = ['Filling', 'RCT', 'Extraction'];
-    return { result: 'Cavity', confidence, suggestions: opts[Math.abs(hash) % opts.length] };
-  }
-  return { result: 'Normal', confidence, suggestions: 'No treatment needed' };
 }
 
 /**
- * Upload an X-ray, run AI prediction, and persist an AiReport.
+ * Upload an X-ray, call the ML service, and persist an AiReport.
+ * Throws ApiError if ML service is unavailable.
+ *
  * @param {object} file       Multer file object (req.file)
- * @param {string} patientId  Mongoose patient _id string
+ * @param {string} patientId  Patient _id
+ * @param {object} requestingUser  { id, role, email } from JWT
  */
-async function uploadAndAnalyzeXray(file, patientId) {
+async function uploadAndAnalyzeXray(file, patientId, requestingUser) {
   const clinic = await getDefaultClinic();
 
   const patient = await Patient.findById(patientId);
   if (!patient || patient.isDeleted) throw ApiError.notFound('Patient not found.');
 
-  const imagePath = `/uploads/${file.filename}`;
   const absoluteImagePath = file.path;
 
-  const aiResult = await runAiPrediction(absoluteImagePath);
+  // ── Call real ML service ─────────────────────────────────────────────────
+  const aiResult = await callMlService(absoluteImagePath);
 
-  // Create a File metadata document (satisfies AiReport's required fileId FK)
+  if (!aiResult) {
+    // Clean up uploaded file if ML is down so storage doesn't accumulate
+    // (optional — remove this block if you want to keep uploads for later retry)
+    throw ApiError.internal(
+      'AI service is currently unavailable. Please try again later or contact the system administrator.'
+    );
+  }
+
+  // ── Persist file metadata ────────────────────────────────────────────────
   const fileDoc = await File.create({
     clinicId: clinic._id,
     patientId: patient._id,
-    uploadedById: clinic._id, // Stub until auth provides userId
+    uploadedById: requestingUser ? requestingUser.id : clinic._id,
     fileType: 'xray',
     storageKey: file.filename,
     originalName: file.originalname,
@@ -94,47 +116,80 @@ async function uploadAndAnalyzeXray(file, patientId) {
     uploadedAt: new Date(),
   });
 
-  // Normalise result to enum: 'cavity' | 'normal' | 'uncertain'
-  const resultNormalized = aiResult.result.toLowerCase() === 'cavity' ? 'cavity' : 'normal';
-  const suggestionsArr = typeof aiResult.suggestions === 'string'
-    ? [aiResult.suggestions]
-    : aiResult.suggestions;
+  // ── Persist AI report ────────────────────────────────────────────────────
+  const resultNormalized = ['cavity', 'normal', 'uncertain'].includes(aiResult.result.toLowerCase())
+    ? aiResult.result.toLowerCase()
+    : 'uncertain';
 
   const report = await AiReport.create({
     clinicId: clinic._id,
     patientId: patient._id,
     fileId: fileDoc._id,
     result: resultNormalized,
-    suggestions: suggestionsArr,
-    confidence: parseFloat(aiResult.confidence.toFixed(2)),
-    modelVersion: '1.0-simulation',
+    suggestions: aiResult.suggestions,
+    confidence: parseFloat(aiResult.confidence.toFixed(4)),
+    modelVersion: aiResult.modelVersion,
   });
 
   return {
     id: report._id.toString(),
     patientId: patientId.toString(),
-    image: imagePath,
-    result: aiResult.result, // original casing for frontend
-    suggestions: aiResult.suggestions,
+    image: `/uploads/${file.filename}`,
+    result: resultNormalized,
     confidence: report.confidence,
+    suggestions: aiResult.suggestions,
+    modelVersion: aiResult.modelVersion,
     date: new Date().toISOString().split('T')[0],
+    doctorReview: null,
+    doctorNotes: null,
   };
 }
 
 /**
- * Fetch all AI reports for a patient.
- * @param {string} patientId
+ * Fetch all AI reports for a patient, newest first.
  */
 async function getAiReportsByPatient(patientId) {
-  const reports = await AiReport.find({ patientId }).sort({ createdAt: -1 }).lean();
+  const AiReportModel = require('../models/ai-report.model');
+  const reports = await AiReportModel.find({ patientId })
+    .populate('fileId', 'storageKey originalName')
+    .sort({ createdAt: -1 })
+    .lean();
+
   return reports.map((r) => ({
     id: r._id.toString(),
     patientId: r.patientId.toString(),
+    image: r.fileId ? `/uploads/${r.fileId.storageKey}` : null,
     result: r.result,
-    suggestions: Array.isArray(r.suggestions) ? r.suggestions.join(', ') : r.suggestions,
     confidence: r.confidence,
+    suggestions: Array.isArray(r.suggestions) ? r.suggestions : [r.suggestions],
+    modelVersion: r.modelVersion || '1.0.0',
     date: r.createdAt ? new Date(r.createdAt).toISOString().split('T')[0] : null,
+    doctorReview: r.doctorReview || null,
+    doctorNotes: r.doctorNotes || null,
   }));
 }
 
-module.exports = { uploadAndAnalyzeXray, getAiReportsByPatient, UPLOAD_DIR };
+/**
+ * Doctor reviews an AI report — confirm or reject finding, add notes.
+ * @param {string} reportId
+ * @param {object} body  { doctorReview: 'confirmed'|'rejected', doctorNotes }
+ */
+async function reviewAiReport(reportId, body, requestingUser) {
+  const report = await AiReport.findById(reportId);
+  if (!report) throw ApiError.notFound('AI report not found.');
+
+  report.doctorReview = body.doctorReview;
+  report.doctorNotes = body.doctorNotes || '';
+  report.reviewedAt = new Date();
+  report.reviewedById = requestingUser?.id;
+  await report.save();
+
+  return {
+    id: report._id.toString(),
+    doctorReview: report.doctorReview,
+    doctorNotes: report.doctorNotes,
+    reviewedAt: report.reviewedAt,
+  };
+}
+
+module.exports = { uploadAndAnalyzeXray, getAiReportsByPatient, reviewAiReport, UPLOAD_DIR };

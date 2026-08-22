@@ -1,30 +1,14 @@
 const express = require('express');
 const appointmentController = require('../controllers/appointment.controller');
-const validateRequest = require('../middleware/validateRequest');
+const { requireRole } = require('../middleware/authMiddleware');
 
 const router = express.Router();
+// Note: authMiddleware is applied in routes/index.js
 
-// TODO: add authMiddleware here when auth / JWT is implemented
-
-/** GET /api/appointments */
 router.get('/', appointmentController.getAppointments);
-
-/** POST /api/appointments */
-router.post(
-  '/',
-  validateRequest({
-    patientId: { required: true, label: 'Patient' },
-    doctorId: { required: true, label: 'Doctor' },
-    date: { required: true, label: 'Date' },
-    time: { required: true, label: 'Time' },
-  }),
-  appointmentController.bookAppointment,
-);
-
-/** PUT /api/appointments/:id/status */
-router.put('/:id/status', appointmentController.updateAppointmentStatus);
-
-/** DELETE /api/appointments/:id — soft-delete (Admin only) */
-router.delete('/:id', appointmentController.softDeleteAppointment);
+router.get('/patient/:patientId', appointmentController.getByPatient);
+router.post('/', appointmentController.bookAppointment);
+router.put('/:id/status', appointmentController.updateStatus);
+router.delete('/:id', requireRole('admin'), appointmentController.softDelete);
 
 module.exports = router;

@@ -1,6 +1,10 @@
-// Receptionist patient detail — delegates to shared admin/PatientDetailPage component
-import PatientDetailPage from '../admin/PatientDetailPage';
+import { useParams } from 'react-router-dom';
+import AdminPatientDetailPage from '../admin/PatientDetailPage';
 
+/**
+ * Receptionist Patient Detail — re-uses the admin PatientDetailPage.
+ * The admin page renders appropriate actions based on user role.
+ */
 export default function ReceptionistPatientDetailPage() {
-  return <PatientDetailPage basePath="/receptionist" />;
+  return <AdminPatientDetailPage />;
 }

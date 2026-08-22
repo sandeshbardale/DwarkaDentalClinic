@@ -1,19 +1,18 @@
 /**
- * server.js — Entry point.
- * Loads config, connects to MongoDB, then starts listening.
- * The Express app setup lives in src/app.js.
+ * Server entry point.
+ * Loads config → connects to MongoDB → seeds database → starts listening.
  */
 const config = require('./src/config/env');
 const { connectDB } = require('./src/config/db');
+const { seedDatabase } = require('./src/config/seed');
 const app = require('./src/app');
 
 async function startServer() {
-  // Atlas is optional for a local UI demo. Keep the API available when the
-  // remote database cannot be reached and let individual routes report a
-  // database error where needed.
   try {
     await connectDB();
     app.locals.databaseAvailable = true;
+    // Seed default clinic, users (bcrypt), and treatment categories
+    await seedDatabase();
   } catch (error) {
     app.locals.databaseAvailable = false;
     console.warn(`[Server] Starting without MongoDB: ${error.message}`);

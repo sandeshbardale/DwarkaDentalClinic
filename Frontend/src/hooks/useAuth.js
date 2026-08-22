@@ -4,46 +4,35 @@ import { loginStart, loginSuccess, loginFailure, logout as logoutAction } from '
 import { ROLE_HOME } from '../constants/routes';
 import { api } from '../utils/api';
 
-/** localStorage key for persisting the session */
 const SESSION_KEY = 'ddc:session';
 
-/**
- * Hook for authentication state and actions connected to Backend.
- */
 export function useAuth() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const { user, role, isAuthenticated, isLoading, error } = useSelector((state) => state.auth);
+  const { user, role, token, isAuthenticated, isLoading, error } = useSelector((state) => state.auth);
 
-  /**
-   * Login function — authenticates via API, persists session, navigates to dashboard.
-   * @param {string} email
-   * @param {string} password
-   */
   async function login(email, password) {
     dispatch(loginStart());
     try {
       const response = await api.login(email, password);
-
-      // Support both flat response and nested data wrapper shapes
-      const userData = response.user || (response.data && response.data.user);
-      const userRole = response.role || (response.data && response.data.role) || userData?.role;
+      const data = response.data || response;
+      const userData = data.user;
+      const userRole = data.role || userData?.role;
+      const userToken = data.token;
 
       if (response.success && userData) {
-        dispatch(loginSuccess({ user: userData, role: userRole }));
+        dispatch(loginSuccess({ user: userData, role: userRole, token: userToken }));
 
-        // Persist session so page refresh doesn't lose auth state
+        // Persist full session including JWT token
         try {
-          localStorage.setItem(SESSION_KEY, JSON.stringify({ user: userData, role: userRole }));
-          // Keep legacy key for apiSlice prepareHeaders compatibility
-          localStorage.setItem('persist:auth', JSON.stringify({ role: userRole }));
+          localStorage.setItem(SESSION_KEY, JSON.stringify({ user: userData, role: userRole, token: userToken }));
         } catch (_) {}
 
         const destPath = ROLE_HOME[userRole] || '/admin';
         navigate(destPath, { replace: true });
         return { success: true };
       } else {
-        const errMsg = response.message || response.error || 'Invalid email or password.';
+        const errMsg = response.message || 'Invalid email or password.';
         dispatch(loginFailure(errMsg));
         return { success: false, error: errMsg };
       }
@@ -58,10 +47,9 @@ export function useAuth() {
     dispatch(logoutAction());
     try {
       localStorage.removeItem(SESSION_KEY);
-      localStorage.removeItem('persist:auth');
     } catch (_) {}
     navigate('/login', { replace: true });
   }
 
-  return { user, role, isAuthenticated, isLoading, error, login, logout };
+  return { user, role, token, isAuthenticated, isLoading, error, login, logout };
 }

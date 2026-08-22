@@ -18,6 +18,7 @@ import AdminReportsPage from '../pages/admin/ReportsPage';
 import AdminNotificationsPage from '../pages/admin/NotificationsPage';
 import AdminSettingsPage from '../pages/admin/SettingsPage';
 import AdminPatientDetailPage from '../pages/admin/PatientDetailPage';
+import TreatmentCategoriesPage from '../pages/admin/TreatmentCategoriesPage';
 
 // Doctor
 import DoctorDashboardPage from '../pages/doctor/DoctorDashboardPage';
@@ -61,6 +62,7 @@ const router = createBrowserRouter([
           { path: 'patients', element: <AdminPatientsPage /> },
           { path: 'patients/:id', element: <AdminPatientDetailPage /> },
           { path: 'appointments', element: <AdminAppointmentsPage /> },
+          { path: 'categories', element: <TreatmentCategoriesPage /> },
           { path: 'doctors', element: <AdminDoctorsPage /> },
           { path: 'staff', element: <AdminStaffPage /> },
           { path: 'revenue', element: <AdminRevenuePage /> },
@@ -93,9 +95,11 @@ const router = createBrowserRouter([
         children: [
           { index: true, element: <ReceptionistDashboardPage /> },
           { path: 'patients', element: <ReceptionistPatientsPage /> },
+          { path: 'register', element: <RegisterPatientPage /> },
           { path: 'patients/new', element: <RegisterPatientPage /> },
           { path: 'patients/:id', element: <ReceptionistPatientDetailPage /> },
           { path: 'appointments', element: <ReceptionistAppointmentsPage /> },
+          { path: 'billing', element: <AdminRevenuePage /> },
           { path: 'follow-ups', element: <ReceptionistFollowUpsPage /> },
           { path: 'notifications', element: <ReceptionistNotificationsPage /> },
           { path: 'profile', element: <ProfilePage /> },

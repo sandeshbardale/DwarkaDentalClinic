@@ -3,23 +3,16 @@ const patientController = require('../controllers/patient.controller');
 const validateRequest = require('../middleware/validateRequest');
 
 const router = express.Router();
+// Note: authMiddleware is applied in routes/index.js before this router
 
-// TODO: add authMiddleware here when auth / JWT is implemented
-
-/** GET /api/patients — list all patients */
 router.get('/', patientController.getPatients);
-
-/** POST /api/patients — register a new patient */
+router.get('/:id', patientController.getPatient);
 router.post(
   '/',
   validateRequest({ name: { required: true, label: 'Name' }, phone: { required: true, label: 'Phone' } }),
   patientController.addPatient,
 );
-
-/** PUT /api/patients/:id — update patient details */
 router.put('/:id', patientController.updatePatient);
-
-/** DELETE /api/patients/:id — soft-delete (Admin only) */
 router.delete('/:id', patientController.softDeletePatient);
 
 module.exports = router;

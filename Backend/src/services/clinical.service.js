@@ -6,8 +6,15 @@ const Clinic = require('../models/clinic.model');
 const ApiError = require('../utils/ApiError');
 
 async function getDefaultClinic() {
-  const clinic = await Clinic.findOne({});
-  if (!clinic) throw ApiError.internal('Clinic not found.');
+  let clinic = await Clinic.findOne({});
+  if (!clinic) {
+    clinic = await Clinic.create({
+      name: 'Dwarka Dental Clinic',
+      email: 'info@dwarkadental.com',
+      phone: '+91 98765 00000',
+      address: { street: 'Sector 12', city: 'Dwarka, New Delhi', state: 'Delhi', zipCode: '110075' }
+    });
+  }
   return clinic;
 }
 
@@ -40,7 +47,7 @@ async function addClinicalRecord(body) {
   const {
     patientId, appointmentId, doctorId, chiefComplaint,
     diagnosis, treatment, clinicalNotes, followUpDate,
-    followUpInstructions, prescription,
+    followUpInstructions, prescription, dentalChart,
   } = body;
 
   const patient = await Patient.findById(patientId);
@@ -65,6 +72,7 @@ async function addClinicalRecord(body) {
     followUpDate: followUpDate || undefined,
     followUpInstructions: followUpInstructions || '',
     prescription: prescriptionStr,
+    dentalChart: Array.isArray(dentalChart) ? dentalChart : [],
     status: 'completed',
   });
 

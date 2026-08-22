@@ -1,53 +1,46 @@
+const bcrypt = require('bcryptjs');
 const User = require('../models/user.model');
 const ApiError = require('../utils/ApiError');
-
-/** Demo users for simulation/fallback mode (no database). */
-const DEMO_USERS = [
-  { _id: 'demo-admin', name: 'Administrator', email: 'admin@dwarkadental.com', password: 'admin123', role: 'admin' },
-  { _id: 'demo-doctor', name: 'Dr. Neha Sharma', email: 'doctor@dwarkadental.com', password: 'doctor123', role: 'doctor', specialization: 'General Dentistry' },
-  { _id: 'demo-receptionist', name: 'Priya Patel', email: 'receptionist@dwarkadental.com', password: 'recep123', role: 'receptionist' },
-];
+const { generateToken } = require('../utils/generateToken');
 
 /**
- * Authenticate a user.
- * Supports demo accounts in both database mode and simulation/fallback mode.
+ * Authenticate a user against the database.
+ * Uses bcrypt for password verification.
+ * Returns a signed JWT and safe user object.
  *
- * @param {string}  email
- * @param {string}  password
- * @param {boolean} dbAvailable  Whether MongoDB is connected
- * @returns {{ user: object, role: string, demoMode?: boolean }}
+ * @param {string} email
+ * @param {string} password
+ * @returns {{ user: object, role: string, token: string }}
  */
-async function login(email, password, dbAvailable) {
+async function login(email, password) {
   const normalizedEmail = email.toLowerCase().trim();
 
-  if (!dbAvailable) {
-    const demoUser = DEMO_USERS.find(
-      (u) => u.email === normalizedEmail && u.password === password,
-    );
-    if (!demoUser) {
-      throw ApiError.badRequest('Invalid email or password.');
-    }
-    const { password: _p, ...safeUser } = demoUser;
-    return { user: safeUser, role: demoUser.role, demoMode: true };
-  }
-
+  // Fetch user with passwordHash (selected: false by default in model)
   const user = await User.findOne({ email: normalizedEmail }).select('+passwordHash');
   if (!user) {
     throw ApiError.badRequest('Invalid email or password.');
   }
 
-  // NOTE: passwordHash comparison placeholder — replace with bcrypt.compare(password, user.passwordHash) when full auth is enabled.
-  // TODO: add authMiddleware / bcrypt comparison here when full auth is implemented.
-  if (user.passwordHash === 'DEMO_PASSWORD_HASH_REPLACE_WITH_BCRYPT') {
-    const validDemoPasswords = ['admin123', 'doctor123', 'recep123'];
-    if (!validDemoPasswords.includes(password)) {
-      throw ApiError.badRequest('Invalid email or password.');
-    }
-  }
-
   if (user.status !== 'active') {
     throw ApiError.forbidden('Account is inactive. Please contact the administrator.');
   }
+
+  // Compare provided password with stored bcrypt hash or fallback to direct match
+  let isMatch = false;
+  try {
+    isMatch = await bcrypt.compare(password, user.passwordHash);
+  } catch (_) {}
+
+  if (!isMatch && user.passwordHash === password) {
+    isMatch = true;
+  }
+
+  if (!isMatch) {
+    throw ApiError.badRequest('Invalid email or password.');
+  }
+
+  // Update last login timestamp
+  User.findByIdAndUpdate(user._id, { lastLoginAt: new Date() }).exec();
 
   const userResponse = {
     id: user._id.toString(),
@@ -58,7 +51,13 @@ async function login(email, password, dbAvailable) {
     specialization: user.specialization,
   };
 
-  return { user: userResponse, role: user.role };
+  // Map sub-roles (assistant, lab_technician, staff) to receptionist role for UI navigation
+  const mappedRole = ['admin', 'doctor'].includes(user.role) ? user.role : 'receptionist';
+
+  // Generate JWT token
+  const token = generateToken({ id: userResponse.id, role: mappedRole, email: user.email });
+
+  return { user: userResponse, role: mappedRole, token };
 }
 
 module.exports = { login };

@@ -6,6 +6,9 @@ import ProtectedRoute from '../layout/ProctectedRoute';
 // Auth
 import LoginPage from '../pages/auth/LoginPage';
 
+// Shared
+import AiXrayPage from '../pages/shared/AiXrayPage';
+
 // Admin
 import AdminDashboardPage from '../pages/admin/AdminDashboardPage';
 import AdminPatientsPage from '../pages/admin/PatientsPage';
@@ -60,6 +63,7 @@ const router = createBrowserRouter([
           { path: 'patients', element: <AdminPatientsPage /> },
           { path: 'patients/:id', element: <AdminPatientDetailPage /> },
           { path: 'appointments', element: <AdminAppointmentsPage /> },
+          { path: 'ai-xray', element: <AiXrayPage /> },
           { path: 'doctors', element: <AdminDoctorsPage /> },
           { path: 'staff', element: <AdminStaffPage /> },
           { path: 'revenue', element: <AdminRevenuePage /> },
@@ -78,6 +82,7 @@ const router = createBrowserRouter([
           { path: 'appointments', element: <DoctorAppointmentsPage /> },
           { path: 'patients', element: <DoctorPatientsPage /> },
           { path: 'patients/:id', element: <DoctorPatientDetailPage /> },
+          { path: 'ai-xray', element: <AiXrayPage /> },
           { path: 'follow-ups', element: <DoctorFollowUpsPage /> },
           { path: 'history', element: <DoctorHistoryPage /> },
           { path: 'notifications', element: <DoctorNotificationsPage /> },
@@ -95,6 +100,8 @@ const router = createBrowserRouter([
           { path: 'patients/new', element: <RegisterPatientPage /> },
           { path: 'patients/:id', element: <ReceptionistPatientDetailPage /> },
           { path: 'appointments', element: <ReceptionistAppointmentsPage /> },
+          { path: 'payments', element: <AdminRevenuePage /> },
+          { path: 'ai-xray', element: <AiXrayPage /> },
           { path: 'follow-ups', element: <ReceptionistFollowUpsPage /> },
           { path: 'notifications', element: <ReceptionistNotificationsPage /> },
           { path: 'profile', element: <ProfilePage /> },

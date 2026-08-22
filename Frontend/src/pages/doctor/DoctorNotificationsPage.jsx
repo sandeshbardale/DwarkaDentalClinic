@@ -1,2 +1,2 @@
-// Shared notifications page — re-exported for doctor role
-export { default } from '../admin/NotificationsPage';
+import NotificationsPage from '../receptionist/NotificationsPage';
+export default NotificationsPage;
