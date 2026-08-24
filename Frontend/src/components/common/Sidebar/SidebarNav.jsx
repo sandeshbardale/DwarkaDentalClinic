@@ -34,6 +34,7 @@ const NAV_ITEMS = {
     { label: 'Patients', to: '/receptionist/patients', icon: Users },
     { label: 'Appointments', to: '/receptionist/appointments', icon: Calendar },
     { label: 'Payments', to: '/receptionist/payments', icon: DollarSign },
+    { label: 'Staff', to: '/receptionist/staff', icon: UserCog },
     { label: 'AI X-ray', to: '/receptionist/ai-xray', icon: Brain },
     { label: 'Register Patient', to: '/receptionist/patients/new', icon: UserPlus },
     { label: 'Follow-ups', to: '/receptionist/follow-ups', icon: ClipboardList },

@@ -73,9 +73,9 @@ router.get('/doctors', authMiddleware, asyncHandler(async (req, res) => {
   })), 'Doctors fetched').send(res);
 }));
 
-// GET /api/auth/staff — return all staff (admin only)
+// GET /api/auth/staff — return all staff
 router.get('/staff', authMiddleware, asyncHandler(async (req, res) => {
-  const staff = await User.find({ status: 'active' })
+  const staff = await User.find({})
     .select('name email role specialization phone status')
     .lean();
   return new ApiResponse(200, staff.map((u) => ({
