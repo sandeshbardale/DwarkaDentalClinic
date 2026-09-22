@@ -24,6 +24,8 @@ const patientSchema = new mongoose.Schema(
     medicalAlerts: [{ type: String, trim: true }],
     generalMedicalHistory: { type: String, trim: true },
     assignedDoctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    treatmentCategoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'TreatmentCategory' },
+    treatmentCategoryName: { type: String, trim: true },
     status: { type: String, enum: ['new', 'follow_up', 'completed', 'inactive'], default: 'new' },
     registeredAt: { type: Date, default: Date.now },
     lastVisitAt: Date,

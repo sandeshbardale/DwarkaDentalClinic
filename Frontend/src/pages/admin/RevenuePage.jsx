@@ -25,7 +25,7 @@ function RecordPaymentModal({ onClose, onSave, saving }) {
   const [date, setDate] = useState(today());
 
   useEffect(() => {
-    api.getPatients({ limit: 100 }).then(res => {
+    api.getPatients({ limit: 500 }).then(res => {
       const list = res.data?.data || (Array.isArray(res.data) ? res.data : []);
       setPatients(list);
       if (list.length > 0) setPatientId(list[0].id);

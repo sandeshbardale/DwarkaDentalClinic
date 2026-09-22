@@ -66,7 +66,7 @@ const DEFAULT_STAFF = [
   {
     name: 'Priya Patel',
     email: 'receptionist@dwarkadental.com',
-    password: 'recep123',
+    password: 'receptionist123',
     role: 'receptionist',
     phone: '+91 98765 00003',
   },

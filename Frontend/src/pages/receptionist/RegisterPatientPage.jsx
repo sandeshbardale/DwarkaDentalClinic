@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ChevronRight, ChevronLeft, CheckCircle } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, ChevronRight, ChevronLeft, CheckCircle, Calendar, Users } from 'lucide-react';
 import { useDispatch } from 'react-redux';
 import { savePatientThunk, addToast } from '../../app/store';
 import Input, { Textarea } from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import { today } from '../../utils/formatters';
 import { api } from '../../utils/api';
+import { normalizeCategoryName } from '../../components/dashboard/CategoryBoardDashboard';
 
 const STEPS = [
   { id: 1, label: 'Personal Information' },
@@ -39,14 +40,32 @@ const initialForm = {
 export default function RegisterPatientPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(initialForm);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [registeredResult, setRegisteredResult] = useState(null);
   const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
   const [newCat, setNewCat] = useState({ name: '', code: '', defaultDurationMinutes: 30, defaultFollowUpDays: 30 });
   const [catSaving, setCatSaving] = useState(false);
+
+  const [doctors, setDoctors] = useState([]);
+  const [categories, setCategories] = useState([]);
+
+  const DEFAULT_CATEGORIES = [
+    { id: 'CONSULT', name: 'General Consultation', defaultDurationMinutes: 30 },
+    { id: 'ORTHO', name: 'Orthodontics', defaultDurationMinutes: 45 },
+    { id: 'RCT', name: 'Root Canal Treatment', defaultDurationMinutes: 60 },
+    { id: 'EXTRACT', name: 'Tooth Extraction', defaultDurationMinutes: 30 },
+    { id: 'FILL', name: 'Cavity Filling', defaultDurationMinutes: 45 },
+    { id: 'SCALE', name: 'Cleaning & Scaling', defaultDurationMinutes: 45 },
+    { id: 'IMPLANT', name: 'Dental Implant', defaultDurationMinutes: 90 },
+    { id: 'CROWN', name: 'Prosthodontics & Crown', defaultDurationMinutes: 60 },
+    { id: 'EMERG', name: 'Emergency Dental', defaultDurationMinutes: 30 },
+    { id: 'XRAY', name: 'X-Ray & Diagnosis', defaultDurationMinutes: 20 },
+  ];
 
   useEffect(() => {
     let localDocs = [];
@@ -55,32 +74,89 @@ export default function RegisterPatientPage() {
       if (raw) localDocs = JSON.parse(raw);
     } catch (_) {}
 
+    const defaults = [
+      { id: 'doc-1', name: 'Dr. Bhagwan Rakh', specialization: 'Orthodontics' },
+      { id: 'doc-2', name: 'Dr. H M Sanap', specialization: 'Endodontics & RCT' },
+      { id: 'doc-3', name: 'Dr. Neha Sharma', specialization: 'General Dentistry' },
+      { id: 'doc-4', name: 'Dr. Rohan Mehta', specialization: 'Endodontics & RCT' },
+      { id: 'doc-5', name: 'Dr. Kavita Iyer', specialization: 'Periodontics' },
+      { id: 'doc-6', name: 'Dr. Arjun Kapoor', specialization: 'Implantology & Prosthodontics' },
+    ];
+
     api.getDoctors().then(res => {
       const apiDocs = res.data || [];
       const map = new Map();
-      const defaults = [
-        { id: 'doc-1', name: 'Dr. Bhagwan Rakh', specialization: 'Orthodontics' },
-        { id: 'doc-2', name: 'Dr. H M Sanap', specialization: 'Endodontics' },
-      ];
       defaults.forEach(d => map.set(d.name.toLowerCase(), d));
       localDocs.forEach(d => map.set(d.name.toLowerCase(), d));
       apiDocs.forEach(d => map.set(d.name.toLowerCase(), d));
       setDoctors(Array.from(map.values()));
     }).catch(() => {
       const map = new Map();
-      const defaults = [
-        { id: 'doc-1', name: 'Dr. Bhagwan Rakh', specialization: 'Orthodontics' },
-        { id: 'doc-2', name: 'Dr. H M Sanap', specialization: 'Endodontics' },
-      ];
       defaults.forEach(d => map.set(d.name.toLowerCase(), d));
       localDocs.forEach(d => map.set(d.name.toLowerCase(), d));
       setDoctors(Array.from(map.values()));
     });
+
     fetchCategories();
   }, []);
 
   function fetchCategories() {
-    api.getCategories({ status: 'active' }).then(res => setCategories(res.data || [])).catch(() => {});
+    const queryCategory = searchParams.get('category') || searchParams.get('categoryId') || '';
+
+    api.getCategories({ status: 'active' }).then(res => {
+      const apiCats = res.data || [];
+      const map = new Map();
+      DEFAULT_CATEGORIES.forEach(c => {
+        const norm = normalizeCategoryName(c.name);
+        map.set(norm.toLowerCase(), { ...c, id: c.id || c._id, name: norm });
+      });
+      apiCats.forEach(c => {
+        const norm = normalizeCategoryName(c.name);
+        map.set(norm.toLowerCase(), { ...c, id: c.id || c._id, name: norm });
+      });
+      const list = Array.from(map.values());
+      setCategories(list);
+
+      if (queryCategory) {
+        const normQ = normalizeCategoryName(queryCategory).toLowerCase();
+        const matched = list.find(c =>
+          String(c.id || c._id) === queryCategory ||
+          normalizeCategoryName(c.name).toLowerCase() === normQ ||
+          (c.code && c.code.toLowerCase() === normQ) ||
+          (c.code && normQ.includes(c.code.toLowerCase()))
+        );
+        if (matched) {
+          const selectedId = matched.id || matched._id;
+          update('treatmentCategoryId', selectedId);
+          // Auto assign doctor
+          const normCatName = normalizeCategoryName(matched.name).toLowerCase();
+          const matchedDoc = doctors.find(d => {
+            const docSpec = normalizeCategoryName(d.specialization || '').toLowerCase();
+            return docSpec === normCatName || docSpec.includes(normCatName) || normCatName.includes(docSpec);
+          });
+          if (matchedDoc) {
+            update('assignedDoctorId', matchedDoc.id || matchedDoc._id);
+          }
+        }
+      }
+    }).catch(() => {
+      const list = DEFAULT_CATEGORIES.map(c => ({ ...c, id: c.id || c._id, name: normalizeCategoryName(c.name) }));
+      setCategories(list);
+
+      if (queryCategory) {
+        const normQ = normalizeCategoryName(queryCategory).toLowerCase();
+        const matched = list.find(c =>
+          String(c.id || c._id) === queryCategory ||
+          normalizeCategoryName(c.name).toLowerCase() === normQ ||
+          (c.code && c.code.toLowerCase() === normQ) ||
+          (c.code && normQ.includes(c.code.toLowerCase()))
+        );
+        if (matched) {
+          const selectedId = matched.id || matched._id;
+          update('treatmentCategoryId', selectedId);
+        }
+      }
+    });
   }
 
   async function handleCreateCategory() {
@@ -119,9 +195,30 @@ export default function RegisterPatientPage() {
       if (!form.name.trim()) errs.name = 'Full name is required.';
       if (!form.gender) errs.gender = 'Gender is required.';
       if (!form.age) errs.age = 'Age is required.';
+      else if (isNaN(form.age) || Number(form.age) <= 0 || Number(form.age) > 120) errs.age = 'Please enter a valid age (1-120).';
     }
     if (s === 2) {
-      if (!form.phone.trim()) errs.phone = 'Phone number is required.';
+      const cleanPhone = (form.phone || '').replace(/\D/g, '');
+      if (!form.phone.trim()) {
+        errs.phone = 'Mobile number is required.';
+      } else if (cleanPhone.length < 10 || cleanPhone.length > 13) {
+        errs.phone = 'Please enter a valid 10-digit mobile number (e.g. 9876543210).';
+      }
+
+      if (form.email && form.email.trim()) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(form.email.trim())) {
+          errs.email = 'Please enter a valid email address (e.g. name@domain.com).';
+        }
+      }
+
+      if (form.emergencyPhone && form.emergencyPhone.trim()) {
+        const cleanEmPhone = form.emergencyPhone.replace(/\D/g, '');
+        if (cleanEmPhone.length < 10 || cleanEmPhone.length > 13) {
+          errs.emergencyPhone = 'Please enter a valid 10-digit emergency mobile number.';
+        }
+      }
+
       if (!form.address.trim()) errs.address = 'Address is required.';
     }
     if (s === 3) {
@@ -141,6 +238,18 @@ export default function RegisterPatientPage() {
   async function handleSubmit() {
     if (!validateStep(3)) return;
     setLoading(true);
+
+    const selectedDoc = doctors.find(d =>
+      String(d.id || d._id) === String(form.assignedDoctorId)
+    );
+    const selectedCat = categories.find(c =>
+      String(c.id || c._id) === String(form.treatmentCategoryId) ||
+      normalizeCategoryName(c.name).toLowerCase() === normalizeCategoryName(String(form.treatmentCategoryId)).toLowerCase() ||
+      (c.code && c.code.toLowerCase() === String(form.treatmentCategoryId).toLowerCase())
+    );
+    const catName = normalizeCategoryName(selectedCat?.name || form.treatmentCategoryId || 'General Consultation');
+    const catId = selectedCat?.id || selectedCat?._id || form.treatmentCategoryId;
+    const docName = selectedDoc?.name || 'Dr. Bhagwan Rakh';
 
     const newPatientData = {
       name: form.name,
@@ -162,37 +271,109 @@ export default function RegisterPatientPage() {
       medicalHistory: form.medicalHistory,
       appointmentDate: form.appointmentDate,
       appointmentTime: form.appointmentTime,
-      treatmentCategoryId: form.treatmentCategoryId,
+      treatmentCategoryId: catId,
+      treatmentCategoryName: catName,
+      categoryName: catName,
       notes: form.notes,
     };
 
     try {
       const response = await dispatch(savePatientThunk(newPatientData));
-      if (response && response.success) {
-        // Sync to local storage cards so it shows on Dashboard and stays saved
+      // Backend ApiResponse wraps result in: { statusCode, success, message, data: { patient, appointment } }
+      const patientResult = response?.data?.patient || response?.patient || null;
+      const isSuccess = response?.success === true || (patientResult !== null);
+
+      if (isSuccess && patientResult) {
+        const todayIso = new Date().toISOString().split('T')[0];
+        const cardDate = form.appointmentDate || todayIso;
+        const cardStatus = cardDate === todayIso ? 'Today' : (cardDate < todayIso ? 'Missed' : 'Upcoming');
+
+        // Sync to localStorage so dashboard, patients page, appointments page all see it instantly
         try {
           const raw = localStorage.getItem('ddc_patient_cards_v2');
           const existing = raw ? JSON.parse(raw) : [];
+
+          // Remove any old card with same phone or fake ID so we don't get duplicates
+          const deduped = existing.filter(c =>
+            (c.patientPhone || '').replace(/\D/g, '') !== form.phone.replace(/\D/g, '')
+          );
+
           const newCard = {
-            id: response.patient?.id || `apt-${Date.now()}`,
+            id: patientResult.id || patientResult._id || `pat-${Date.now()}`,
+            patientNumber: patientResult.patientNumber || patientResult.patientId || '',
             patientName: form.name,
             patientPhone: form.phone,
             age: parseInt(form.age) || 30,
-            gender: form.gender || 'Male',
-            doctorName: 'Dr. Sarah Smith',
-            date: form.appointmentDate || new Date().toISOString().split('T')[0],
-            categoryName: 'Orthodontic',
-            status: 'Upcoming',
+            gender: form.gender ? (form.gender.charAt(0).toUpperCase() + form.gender.slice(1).toLowerCase()) : 'Male',
+            bloodGroup: form.bloodGroup || 'O+',
+            email: form.email || '',
+            address: form.address || '',
+            emergencyContact: {
+              name: form.emergencyName || '',
+              relation: form.emergencyRelation || 'Family',
+              phone: form.emergencyPhone || ''
+            },
+            chiefComplaint: form.chiefComplaint || 'Dental consultation',
+            allergies: form.allergies || 'None',
+            medicalHistory: form.medicalHistory || 'None',
+            doctorName: docName,
+            date: cardDate,
+            categoryName: catName,
+            treatmentCategoryId: catId,
+            treatmentCategoryName: catName,
+            status: cardStatus,
             totalFee: 15000,
             amountPaid: 3000,
             amountDue: 12000,
             paymentStatus: 'Pending',
             nextAppointmentDays: 28,
+            createdAt: new Date().toISOString(),
             paymentHistory: [
-              { id: `pay-${Date.now()}`, receiptNo: `RCP-2026-${Math.floor(100 + Math.random() * 900)}`, date: new Date().toISOString().split('T')[0], mode: 'UPI', amount: 3000, notes: 'Registration Deposit' }
+              {
+                id: `pay-${Date.now()}`,
+                receiptNo: `RCP-2026-${Math.floor(100 + Math.random() * 900)}`,
+                date: todayIso,
+                mode: 'UPI',
+                amount: 3000,
+                notes: 'Registration Deposit'
+              }
             ]
           };
-          localStorage.setItem('ddc_patient_cards_v2', JSON.stringify([newCard, ...existing]));
+          localStorage.setItem('ddc_patient_cards_v2', JSON.stringify([newCard, ...deduped]));
+          try {
+            const rawV1 = localStorage.getItem('ddc_patient_cards_v1');
+            const v1Arr = rawV1 ? JSON.parse(rawV1) : [];
+            const v1Deduped = v1Arr.filter(c => (c.patientPhone || '').replace(/\D/g, '') !== form.phone.replace(/\D/g, ''));
+            localStorage.setItem('ddc_patient_cards_v1', JSON.stringify([newCard, ...v1Deduped]));
+          } catch (_) {}
+
+          // Ensure new patient is never marked as deleted in ddc_deleted_patients
+          try {
+            const rawDel = localStorage.getItem('ddc_deleted_patients');
+            if (rawDel) {
+              const delArr = JSON.parse(rawDel);
+              const pIdStr = String(patientResult.id || patientResult._id || '').toLowerCase();
+              const pPhoneClean = form.phone.replace(/\D/g, '');
+              const cleaned = Array.isArray(delArr) ? delArr.filter(x => {
+                const str = String(x).toLowerCase();
+                if (pIdStr && str === pIdStr) return false;
+                if (str.startsWith('phone:') && str === `phone:${pPhoneClean}`) return false;
+                return true;
+              }) : [];
+              localStorage.setItem('ddc_deleted_patients', JSON.stringify(cleaned));
+            }
+          } catch (_) {}
+
+          // Broadcast to all open pages so they refresh immediately (no manual reload needed)
+          window.dispatchEvent(new Event('storage'));
+          window.dispatchEvent(new CustomEvent('ddc_patient_data_updated', {
+            detail: {
+              action: 'register',
+              card: newCard,
+              patient: patientResult,
+              appointment: response?.data?.appointment || null
+            }
+          }));
         } catch (err) {
           console.error('LocalStorage sync error', err);
         }
@@ -200,31 +381,92 @@ export default function RegisterPatientPage() {
         dispatch(addToast({
           type: 'success',
           title: 'Patient Registered',
-          message: `${form.name} (${response.patient.patientId}) has been successfully registered.`,
+          message: `${form.name} (${patientResult.patientNumber || patientResult.patientId || 'New'}) has been successfully registered.`,
         }));
+        // Store appointment info so success screen can show right link
+        const aptDate = form.appointmentDate || new Date().toISOString().split('T')[0];
+        const todayStr = new Date().toISOString().split('T')[0];
+        const aptView = aptDate > todayStr ? 'upcoming' : 'today';
+        setRegisteredResult({
+          patient: patientResult,
+          appointment: response?.data?.appointment || null,
+          aptView,
+          aptDate,
+        });
         setDone(true);
+      } else {
+        dispatch(addToast({ type: 'error', title: 'Registration Failed', message: 'Could not register patient. Please try again.' }));
       }
     } catch (e) {
-      console.error(e);
+      console.error('Registration error:', e);
+      dispatch(addToast({ type: 'error', title: 'Error', message: e.message || 'Registration failed.' }));
     } finally {
       setLoading(false);
     }
   }
 
   if (done) {
+    const goToAppointments = () => {
+      // Re-fire event so any mounted Appointments page refreshes immediately
+      window.dispatchEvent(new CustomEvent('ddc_patient_data_updated'));
+      const view = registeredResult?.aptView || 'today';
+      navigate(`/receptionist/appointments?view=${view}`);
+    };
+
+    const goToPatients = () => {
+      window.dispatchEvent(new CustomEvent('ddc_patient_data_updated'));
+      navigate('/receptionist/patients');
+    };
+
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center animate-fade-in">
-        <div className="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center mb-5">
-          <CheckCircle size={32} className="text-emerald-500" />
+      <div className="flex flex-col items-center justify-center py-16 text-center animate-fade-in">
+        {/* Success icon */}
+        <div className="w-20 h-20 rounded-full bg-emerald-50 flex items-center justify-center mb-5 shadow-md">
+          <CheckCircle size={38} className="text-emerald-500" />
         </div>
-        <h2 className="text-xl font-semibold text-[var(--color-text)] mb-2">Patient Registered Successfully!</h2>
-        <p className="text-[var(--color-text-muted)] mb-6">The patient record has been created and an appointment has been scheduled.</p>
-        <div className="flex gap-3">
-          <button onClick={() => { setDone(false); setStep(1); setForm(initialForm); }} className="text-sm px-4 h-9 rounded-lg border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-subtle)] cursor-pointer">
+        <h2 className="text-xl font-semibold text-[var(--color-text)] mb-1">Patient Registered Successfully!</h2>
+        <p className="text-[var(--color-text-muted)] mb-2">The patient record has been created and an appointment has been scheduled.</p>
+
+        {/* Appointment quick-info */}
+        {registeredResult?.patient && (
+          <div className="mt-3 mb-6 card p-4 text-left w-full max-w-sm space-y-2 border border-emerald-200 bg-emerald-50/50">
+            <div className="flex items-center gap-2 text-emerald-700 font-semibold text-sm">
+              <Calendar size={15} />
+              Appointment Details
+            </div>
+            <div className="text-sm text-[var(--color-text)]">
+              <span className="font-medium">{registeredResult.patient.name}</span>
+              {registeredResult.patient.patientNumber && (
+                <span className="ml-2 text-xs text-[var(--color-text-muted)]">({registeredResult.patient.patientNumber})</span>
+              )}
+            </div>
+            <div className="text-xs text-[var(--color-text-muted)] flex gap-3">
+              <span>📅 {registeredResult.aptDate}</span>
+              <span className={`font-semibold capitalize ${
+                registeredResult.aptView === 'today' ? 'text-amber-600' : 'text-blue-600'
+              }`}>{registeredResult.aptView === 'today' ? '🟡 Today' : '🔵 Upcoming'}</span>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-3 justify-center">
+          <button
+            onClick={() => { setDone(false); setStep(1); setForm(initialForm); setRegisteredResult(null); }}
+            className="text-sm px-4 h-9 rounded-lg border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-subtle)] cursor-pointer"
+          >
             Register Another
           </button>
-          <button onClick={() => navigate('/receptionist/patients')} className="text-sm px-4 h-9 rounded-lg bg-[var(--color-primary-500)] text-white hover:bg-[var(--color-primary-600)] cursor-pointer">
-            View All Patients
+          <button
+            onClick={goToAppointments}
+            className="text-sm px-5 h-9 rounded-lg bg-amber-500 text-white hover:bg-amber-600 cursor-pointer flex items-center gap-1.5 font-medium shadow-sm"
+          >
+            <Calendar size={14} /> View in Appointments
+          </button>
+          <button
+            onClick={goToPatients}
+            className="text-sm px-4 h-9 rounded-lg bg-[var(--color-primary-500)] text-white hover:bg-[var(--color-primary-600)] cursor-pointer flex items-center gap-1.5"
+          >
+            <Users size={14} /> View All Patients
           </button>
         </div>
       </div>
@@ -279,7 +521,7 @@ export default function RegisterPatientPage() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <Input label="Phone Number" id="reg-phone" type="tel" required value={form.phone} onChange={e => update('phone', e.target.value)} error={errors.phone} placeholder="+91 98001 XXXXX" />
-              <Input label="Email Address" id="reg-email" type="email" value={form.email} onChange={e => update('email', e.target.value)} placeholder="patient@email.com" />
+              <Input label="Email Address" id="reg-email" type="email" value={form.email} onChange={e => update('email', e.target.value)} error={errors.email} placeholder="patient@email.com" />
             </div>
             <Textarea label="Address" id="reg-address" required value={form.address} onChange={e => update('address', e.target.value)} error={errors.address} placeholder="Full address…" rows={2} />
 
@@ -288,7 +530,7 @@ export default function RegisterPatientPage() {
               <div className="grid grid-cols-3 gap-3">
                 <Input label="Name" id="ec-name" value={form.emergencyName} onChange={e => update('emergencyName', e.target.value)} placeholder="Contact name" />
                 <Input label="Relation" id="ec-rel" value={form.emergencyRelation} onChange={e => update('emergencyRelation', e.target.value)} placeholder="e.g., Father" />
-                <Input label="Phone" id="ec-phone" type="tel" value={form.emergencyPhone} onChange={e => update('emergencyPhone', e.target.value)} placeholder="+91…" />
+                <Input label="Phone" id="ec-phone" type="tel" value={form.emergencyPhone} onChange={e => update('emergencyPhone', e.target.value)} error={errors.emergencyPhone} placeholder="+91…" />
               </div>
             </div>
           </div>
@@ -318,14 +560,14 @@ export default function RegisterPatientPage() {
                     <button
                       type="button"
                       onClick={() => setShowAddCategoryModal(true)}
-                      className="text-xs text-[var(--color-primary-600)] hover:underline font-medium flex items-center gap-0.5"
+                      className="text-xs text-[var(--color-primary-600)] hover:underline font-medium flex items-center gap-0.5 cursor-pointer"
                     >
                       + Add Category
                     </button>
                   </div>
                   <Select
                     id="reg-category"
-                    options={categories.map(c => ({ value: c.id, label: `${c.name} (${c.defaultDurationMinutes} min)` }))}
+                    options={categories.map(c => ({ value: c.id, label: `${c.name} (${c.defaultDurationMinutes || 30} min)` }))}
                     placeholder={categories.length === 0 ? 'Loading categories…' : 'Select category'}
                     value={form.treatmentCategoryId}
                     onChange={e => update('treatmentCategoryId', e.target.value)}

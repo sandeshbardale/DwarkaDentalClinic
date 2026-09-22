@@ -210,10 +210,12 @@ export default function PatientDetailPage({ basePath = '/admin' }) {
     );
   }
 
+  const rolePath = currentUserRole === 'receptionist' ? '/receptionist' : currentUserRole === 'doctor' ? '/doctor' : (basePath || '/admin');
+
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Back */}
-      <Link to={`${basePath}/patients`} className="inline-flex items-center gap-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] cursor-pointer">
+      <Link to={`${rolePath}/patients`} className="inline-flex items-center gap-2 text-sm font-medium text-[var(--color-primary-600)] hover:underline cursor-pointer">
         <ArrowLeft size={15} /> Back to Patients
       </Link>
 

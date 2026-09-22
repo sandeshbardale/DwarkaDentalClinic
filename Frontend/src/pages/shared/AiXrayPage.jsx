@@ -17,7 +17,7 @@ export default function AiXrayPage() {
   useEffect(() => {
     async function loadPatients() {
       try {
-        const res = await api.getPatients({ limit: 100 });
+        const res = await api.getPatients({ limit: 500 });
         const list = res.data?.data || (Array.isArray(res.data) ? res.data : []);
         setPatients(list);
         if (list.length > 0) setSelectedPatientId(list[0]._id || list[0].id);

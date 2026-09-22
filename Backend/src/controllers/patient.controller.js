@@ -27,9 +27,11 @@ const updatePatient = asyncHandler(async (req, res) => {
   return new ApiResponse(200, { patient }, 'Patient updated').send(res);
 });
 
-/** DELETE /api/patients/:id — Admin only */
+/** DELETE /api/patients/:id — Admin and Receptionist */
 const softDeletePatient = asyncHandler(async (req, res) => {
-  if (req.user.role !== 'admin') throw ApiError.forbidden('Admin-only action.');
+  if (!['admin', 'receptionist'].includes(req.user?.role)) {
+    throw ApiError.forbidden('Admin or Receptionist role required.');
+  }
   await patientService.softDeletePatient(req.params.id);
   return new ApiResponse(200, null, 'Patient soft-deleted successfully').send(res);
 });

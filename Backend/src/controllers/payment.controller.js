@@ -21,9 +21,11 @@ const addPayment = asyncHandler(async (req, res) => {
   return new ApiResponse(201, { payment }, 'Payment recorded').send(res);
 });
 
-/** DELETE /api/payments/:id — Admin only */
+/** DELETE /api/payments/:id — Admin and Receptionist */
 const softDeletePayment = asyncHandler(async (req, res) => {
-  if (req.user.role !== 'admin') throw ApiError.forbidden('Admin-only action.');
+  if (!['admin', 'receptionist'].includes(req.user?.role)) {
+    throw ApiError.forbidden('Admin or Receptionist role required.');
+  }
   await paymentService.softDeletePayment(req.params.id);
   return new ApiResponse(200, null, 'Payment record voided').send(res);
 });

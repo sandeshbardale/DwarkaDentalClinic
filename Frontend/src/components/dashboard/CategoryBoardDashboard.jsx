@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Users, Calendar, Clock, AlertTriangle, Plus, Phone, Calendar as CalendarIcon,
   Loader2, CheckCircle2, ShieldAlert, Edit3, DollarSign, Download, Send, Filter,
@@ -15,18 +15,33 @@ const CARDS_STORAGE_KEY = 'ddc_patient_cards_v2';
 const CATS_STORAGE_KEY = 'ddc_categories_v2';
 
 const CATEGORY_THEMES = {
-  'Root Canal': { border: 'border-l-rose-500', bgIcon: 'bg-rose-50 text-rose-600 border-rose-100', badge: 'bg-rose-50 text-rose-700 border-rose-200' },
+  'General Consultation': { border: 'border-l-teal-500', bgIcon: 'bg-teal-50 text-teal-600 border-teal-100', badge: 'bg-teal-50 text-teal-700 border-teal-200' },
+  'Orthodontics': { border: 'border-l-violet-600', bgIcon: 'bg-violet-50 text-violet-600 border-violet-100', badge: 'bg-violet-50 text-violet-700 border-violet-200' },
   'Orthodontic': { border: 'border-l-violet-600', bgIcon: 'bg-violet-50 text-violet-600 border-violet-100', badge: 'bg-violet-50 text-violet-700 border-violet-200' },
+  'Root Canal': { border: 'border-l-rose-500', bgIcon: 'bg-rose-50 text-rose-600 border-rose-100', badge: 'bg-rose-50 text-rose-700 border-rose-200' },
+  'Root Canal Treatment': { border: 'border-l-rose-500', bgIcon: 'bg-rose-50 text-rose-600 border-rose-100', badge: 'bg-rose-50 text-rose-700 border-rose-200' },
+  'Tooth Extraction': { border: 'border-l-amber-500', bgIcon: 'bg-amber-50 text-amber-600 border-amber-100', badge: 'bg-amber-50 text-amber-700 border-amber-200' },
   'Extraction': { border: 'border-l-amber-500', bgIcon: 'bg-amber-50 text-amber-600 border-amber-100', badge: 'bg-amber-50 text-amber-700 border-amber-200' },
+  'Cavity Filling': { border: 'border-l-emerald-500', bgIcon: 'bg-emerald-50 text-emerald-600 border-emerald-100', badge: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  'Cleaning & Scaling': { border: 'border-l-cyan-500', bgIcon: 'bg-cyan-50 text-cyan-600 border-cyan-100', badge: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
   'Dental Implant': { border: 'border-l-sky-500', bgIcon: 'bg-sky-50 text-sky-600 border-sky-100', badge: 'bg-sky-50 text-sky-700 border-sky-200' },
+  'Prosthodontics & Crown': { border: 'border-l-orange-500', bgIcon: 'bg-orange-50 text-orange-600 border-orange-100', badge: 'bg-orange-50 text-orange-700 border-orange-200' },
+  'Emergency Dental': { border: 'border-l-red-600', bgIcon: 'bg-red-50 text-red-600 border-red-100', badge: 'bg-red-50 text-red-700 border-red-200' },
+  'X-Ray & Diagnosis': { border: 'border-l-blue-600', bgIcon: 'bg-blue-50 text-blue-600 border-blue-100', badge: 'bg-blue-50 text-blue-700 border-blue-200' },
   'default': { border: 'border-l-indigo-500', bgIcon: 'bg-indigo-50 text-indigo-600 border-indigo-100', badge: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
 };
 
 const DEFAULT_CATEGORIES = [
-  { id: 'cat-1', name: 'Root Canal', code: 'RCT', defaultFollowUpDays: 8 },
-  { id: 'cat-2', name: 'Orthodontic', code: 'ORTHO', defaultFollowUpDays: 28 },
-  { id: 'cat-3', name: 'Extraction', code: 'EXT', defaultFollowUpDays: 7 },
-  { id: 'cat-4', name: 'Dental Implant', code: 'IMP', defaultFollowUpDays: 30 },
+  { id: 'cat-consult', name: 'General Consultation', code: 'CONSULT', defaultFollowUpDays: 30 },
+  { id: 'cat-ortho', name: 'Orthodontics', code: 'ORTHO', defaultFollowUpDays: 28 },
+  { id: 'cat-rct', name: 'Root Canal Treatment', code: 'RCT', defaultFollowUpDays: 10 },
+  { id: 'cat-extract', name: 'Tooth Extraction', code: 'EXTRACT', defaultFollowUpDays: 7 },
+  { id: 'cat-fill', name: 'Cavity Filling', code: 'FILL', defaultFollowUpDays: 30 },
+  { id: 'cat-scale', name: 'Cleaning & Scaling', code: 'SCALE', defaultFollowUpDays: 180 },
+  { id: 'cat-implant', name: 'Dental Implant', code: 'IMPLANT', defaultFollowUpDays: 14 },
+  { id: 'cat-crown', name: 'Prosthodontics & Crown', code: 'CROWN', defaultFollowUpDays: 7 },
+  { id: 'cat-emerg', name: 'Emergency Dental', code: 'EMERG', defaultFollowUpDays: 3 },
+  { id: 'cat-xray', name: 'X-Ray & Diagnosis', code: 'XRAY', defaultFollowUpDays: 7 },
 ];
 
 const INITIAL_CARDS = [
@@ -191,12 +206,20 @@ const INITIAL_CARDS = [
 ];
 
 export function normalizeCategoryName(name) {
-  if (!name) return 'Orthodontic';
-  const clean = name.trim().toLowerCase().replace(/\s+treatment$/i, '');
-  if (['root canal', 'rct', 'root canal treatment'].includes(clean)) return 'Root Canal';
-  if (['orthodontic', 'orthodontics', 'othodontic', 'othodontics', 'ortho', 'braces'].includes(clean)) return 'Orthodontic';
-  if (['extraction', 'tooth extraction', 'extractions'].includes(clean)) return 'Extraction';
+  if (!name) return 'General Consultation';
+  let clean = name.trim().toLowerCase();
+  // Strip parentheticals like (rct), (braces), etc.
+  clean = clean.replace(/\s*\([^)]*\)/g, '').trim();
+  if (['root canal', 'rct', 'root canal treatment', 'endodontics & rct', 'endodontics'].includes(clean)) return 'Root Canal Treatment';
+  if (['orthodontic', 'orthodontics', 'othodontic', 'othodontics', 'ortho', 'braces'].includes(clean)) return 'Orthodontics';
+  if (['extraction', 'tooth extraction', 'extractions'].includes(clean)) return 'Tooth Extraction';
   if (['dental implant', 'implant', 'implants', 'dental implants'].includes(clean)) return 'Dental Implant';
+  if (['general consultation', 'consultation', 'consult', 'general dentistry'].includes(clean)) return 'General Consultation';
+  if (['cleaning & scaling', 'scaling & cleaning', 'scale', 'scaling', 'cleaning', 'periodontics'].includes(clean)) return 'Cleaning & Scaling';
+  if (['cavity filling', 'filling', 'fill'].includes(clean)) return 'Cavity Filling';
+  if (['prosthodontics & crown', 'crown', 'prosthodontics', 'implantology & prosthodontics'].includes(clean)) return 'Prosthodontics & Crown';
+  if (['emergency dental', 'emergency', 'emerg'].includes(clean)) return 'Emergency Dental';
+  if (['x-ray & diagnosis', 'x-ray', 'xray', 'diagnosis'].includes(clean)) return 'X-Ray & Diagnosis';
   return name.trim();
 }
 
@@ -221,6 +244,28 @@ function getStoredCards() {
   const allCards = [];
   const seenIds = new Set();
 
+  let deletedSet = new Set();
+  try {
+    const raw = localStorage.getItem('ddc_deleted_patients');
+    if (raw) {
+      const arr = JSON.parse(raw);
+      const cleaned = Array.isArray(arr) ? arr.filter(x => !String(x).startsWith('phone:') && !String(x).startsWith('name:')) : [];
+      if (Array.isArray(arr) && cleaned.length !== arr.length) {
+        localStorage.setItem('ddc_deleted_patients', JSON.stringify(cleaned));
+      }
+      cleaned.forEach(x => {
+        deletedSet.add(String(x));
+        deletedSet.add(String(x).toLowerCase());
+      });
+    }
+  } catch (_) {}
+
+  const isDeleted = (id) => {
+    if (!id) return false;
+    const str = String(id).toLowerCase();
+    return deletedSet.has(str) || deletedSet.has(String(id));
+  };
+
   for (const key of keys) {
     try {
       const raw = localStorage.getItem(key);
@@ -229,6 +274,7 @@ function getStoredCards() {
         if (Array.isArray(parsed)) {
           for (const card of parsed) {
             const cardId = card.id || card._id || `${card.patientName || card.name}-${card.patientPhone || card.phone}`;
+            if (isDeleted(cardId)) continue;
             if (cardId && !seenIds.has(cardId)) {
               seenIds.add(cardId);
               allCards.push({
@@ -248,6 +294,7 @@ function getStoredCards() {
 
   for (const card of INITIAL_CARDS) {
     const cardId = card.id;
+    if (isDeleted(cardId)) continue;
     if (!seenIds.has(cardId)) {
       seenIds.add(cardId);
       allCards.push({
@@ -273,13 +320,15 @@ function getStoredCategories() {
 export default function CategoryBoardDashboard() {
   const { role: userRole } = useAuth();
   const isAdmin = userRole === 'admin';
+  const navigate = useNavigate();
 
   const [categories, setCategories] = useState(getStoredCategories);
   const [cards, setCards] = useState(getStoredCards);
   const [doctorsList, setDoctorsList] = useState(['Dr. Bhagwan Rakh', 'Dr. H M Sanap']);
+  const [staffDetails, setStaffDetails] = useState([]);
 
   useEffect(() => {
-    async function loadDoctors() {
+    async function loadDoctorsAndStaff() {
       let localDocs = [];
       try {
         const raw = localStorage.getItem('ddc_doctors_v1');
@@ -287,24 +336,50 @@ export default function CategoryBoardDashboard() {
       } catch (_) {}
 
       try {
-        const res = await api.getDoctors();
-        const apiDocs = Array.isArray(res.data) && res.data.length > 0 ? res.data : [];
+        const [docRes, staffRes] = await Promise.all([
+          api.getDoctors().catch(() => ({ data: [] })),
+          api.getStaff().catch(() => ({ data: [] })),
+        ]);
+        const apiDocs = Array.isArray(docRes.data) && docRes.data.length > 0 ? docRes.data : [];
+        const apiStaff = Array.isArray(staffRes.data) && staffRes.data.length > 0 ? staffRes.data : (Array.isArray(staffRes) ? staffRes : []);
+
         const namesSet = new Set(['Dr. Bhagwan Rakh', 'Dr. H M Sanap']);
         localDocs.forEach(d => { if (d.name) namesSet.add(d.name); });
         apiDocs.forEach(d => { if (d.name) namesSet.add(d.name); });
         setDoctorsList(Array.from(namesSet));
+
+        const defaultStaff = [
+          { id: 'stf-1', name: 'Dr. Admin', email: 'admin@dwarkadental.com', role: 'admin', phone: '+91 98765 00001' },
+          { id: 'stf-2', name: 'Dr. Neha Sharma', email: 'doctor@dwarkadental.com', role: 'doctor', specialization: 'General Dentistry', phone: '+91 98765 00002' },
+          { id: 'stf-3', name: 'Dr. Rohan Mehta', email: 'rohan@dwarkadental.com', role: 'doctor', specialization: 'Endodontics & RCT', phone: '+91 98765 00004' },
+          { id: 'stf-4', name: 'Priya Patel', email: 'receptionist@dwarkadental.com', role: 'receptionist', phone: '+91 98765 00003' },
+        ];
+        setStaffDetails(apiStaff.length > 0 ? apiStaff : defaultStaff);
       } catch (_) {
         const namesSet = new Set(['Dr. Bhagwan Rakh', 'Dr. H M Sanap']);
         localDocs.forEach(d => { if (d.name) namesSet.add(d.name); });
         setDoctorsList(Array.from(namesSet));
       }
     }
-    loadDoctors();
+    loadDoctorsAndStaff();
   }, []);
 
   // Synchronized Search via URL Search Params
   const [searchParams, setSearchParams] = useSearchParams();
   const searchQuery = searchParams.get('q') || '';
+  const [statusFilter, setStatusFilter] = useState('ALL'); // 'ALL' | 'TODAY' | 'MISSED'
+
+  function handleFilterClick(newFilter) {
+    if (statusFilter === newFilter && newFilter !== 'ALL') {
+      setStatusFilter('ALL');
+    } else {
+      setStatusFilter(newFilter);
+      // Auto expand categories with matching cards
+      const all = {};
+      categories.forEach(c => { all[c.id] = true; });
+      setExpandedCategories(all);
+    }
+  }
 
   function handleSearchChange(val) {
     if (val) {
@@ -411,55 +486,283 @@ export default function CategoryBoardDashboard() {
     }
   }, [categories]);
 
-  // Sync patients from MongoDB database API so backend patients are never lost
-  useEffect(() => {
-    async function fetchBackendPatients() {
-      try {
-        const res = await api.getPatients().catch(() => null);
-        const apiPatients = res?.data?.patients || res?.data || [];
-        if (Array.isArray(apiPatients) && apiPatients.length > 0) {
-          setCards(prevCards => {
-            const existingIds = new Set(prevCards.map(c => c.id || c._id));
-            const newCards = [];
-            for (const p of apiPatients) {
-              const pId = p.id || p._id;
-              if (pId && !existingIds.has(pId)) {
-                existingIds.add(pId);
-                newCards.push({
-                  id: pId,
-                  patientName: p.name || p.patientName || 'Patient',
-                  patientPhone: p.phone || p.patientPhone || '9876543210',
-                  age: p.age || 30,
-                  gender: p.gender || 'Male',
-                  bloodGroup: p.bloodGroup || 'O+',
-                  email: p.email || '',
-                  address: p.address || 'Dwarka, New Delhi',
-                  emergencyContact: p.emergencyContact || { name: 'Guardian', relation: 'Family', phone: p.phone },
-                  chiefComplaint: p.chiefComplaint || 'Dental Treatment',
-                  allergies: p.allergies || 'None',
-                  medicalHistory: p.medicalHistory || 'None',
-                  doctorName: p.doctorName || p.assignedDoctorName || 'Dr. Bhagwan Rakh',
-                  date: p.date || new Date().toISOString().split('T')[0],
-                  categoryName: normalizeCategoryName(p.categoryName || p.treatmentCategoryName || 'Orthodontic'),
-                  status: p.status || 'Today',
-                  totalFee: p.totalFee || 25000,
-                  amountPaid: p.amountPaid || 0,
-                  amountDue: p.amountDue || (p.totalFee || 25000),
-                  paymentStatus: p.paymentStatus || 'Pending',
-                  nextAppointmentDays: p.nextAppointmentDays || 28,
-                  paymentHistory: p.paymentHistory || []
-                });
-              }
-            }
-            return newCards.length > 0 ? [...prevCards, ...newCards] : prevCards;
-          });
+  // Sync patients and appointments from MongoDB database API and local storage
+  const loadAllCards = useCallback(async () => {
+    const todayIso = new Date().toISOString().split('T')[0];
+
+    // Load set of patient IDs that were explicitly deleted
+    let deletedPatientIds = new Set();
+    try {
+      const raw = localStorage.getItem('ddc_deleted_patients');
+      if (raw) {
+        const arr = JSON.parse(raw);
+        const cleaned = Array.isArray(arr) ? arr.filter(x => !String(x).startsWith('phone:') && !String(x).startsWith('name:')) : [];
+        if (Array.isArray(arr) && cleaned.length !== arr.length) {
+          localStorage.setItem('ddc_deleted_patients', JSON.stringify(cleaned));
         }
-      } catch (err) {
-        console.error(err);
+        cleaned.forEach(x => {
+          deletedPatientIds.add(String(x));
+          deletedPatientIds.add(String(x).toLowerCase());
+        });
       }
+    } catch (_) {}
+
+    const isPatientDeleted = (id) => {
+      if (!id) return false;
+      const str = String(id).toLowerCase();
+      return deletedPatientIds.has(str) || deletedPatientIds.has(String(id));
+    };
+
+    // 1. Read existing local cards (filter out deleted patients)
+    const stored = getStoredCards();
+    const map = new Map();
+    stored.forEach(c => {
+      if (isPatientDeleted(c.id)) return;
+      const key = (c.id || c.patientPhone || c.patientName || '').toLowerCase();
+      if (key) map.set(key, c);
+    });
+
+    // 2. Fetch backend patients, appointments, and categories
+    try {
+      const [patsRes, aptsRes, catsRes] = await Promise.all([
+        api.getPatients({ limit: 500 }).catch(() => null),
+        api.getAppointments({ limit: 500 }).catch(() => null),
+        api.getCategories({ status: 'active' }).catch(() => null),
+      ]);
+
+      const pats = patsRes?.data?.data || patsRes?.data?.patients || (Array.isArray(patsRes?.data) ? patsRes.data : []);
+      const apts = aptsRes?.data?.data || (Array.isArray(aptsRes?.data) ? aptsRes.data : []);
+      const cats = catsRes?.data || [];
+
+      if (Array.isArray(cats) && cats.length > 0) {
+        setCategories(prev => deduplicateCategories([...prev, ...cats]));
+      }
+
+      // Index appointments by patientId, phone, name
+      const aptsByPatient = new Map();
+      apts.forEach(a => {
+        if (isPatientDeleted(a.patientId) || isPatientDeleted(a.id)) return;
+        const idKey = (a.patientId || '').toLowerCase();
+        const phoneKey = (a.patientPhone || '').replace(/\D/g, '');
+        const nameKey = (a.patientName || '').toLowerCase().trim();
+
+        if (idKey && !aptsByPatient.has(idKey)) aptsByPatient.set(idKey, a);
+        if (phoneKey && !aptsByPatient.has(phoneKey)) aptsByPatient.set(phoneKey, a);
+        if (nameKey && !aptsByPatient.has(nameKey)) aptsByPatient.set(nameKey, a);
+      });
+
+      // Merge backend patients — skip if in deleted set
+      pats.forEach(p => {
+        const pId = p.id || p._id;
+        if (isPatientDeleted(pId)) return;
+
+        const pPhone = (p.phone || '').replace(/\D/g, '');
+        const pName = (p.name || '').toLowerCase().trim();
+
+        const key = (pId || pPhone || pName).toLowerCase();
+        const existing = map.get(key) || map.get(pPhone) || map.get(pName) || {};
+
+        const apt = aptsByPatient.get(pId?.toLowerCase()) || aptsByPatient.get(pPhone) || aptsByPatient.get(pName);
+
+        let aptDate = apt?.date || existing.date || p.appointmentDate || p.date || todayIso;
+        let cardStatus = 'Upcoming';
+        if (apt) {
+          if (apt.date === todayIso || apt.status === 'arrived' || apt.status === 'in_progress') {
+            cardStatus = 'Today';
+          } else if (apt.status === 'missed' || (apt.date < todayIso && !['completed', 'cancelled'].includes(apt.status))) {
+            cardStatus = 'Missed';
+          } else if (apt.status === 'completed') {
+            cardStatus = 'Completed';
+          } else {
+            cardStatus = 'Upcoming';
+          }
+        } else if (existing.status && ['Today', 'Missed', 'Upcoming'].includes(existing.status)) {
+          cardStatus = existing.status;
+        } else if (aptDate === todayIso) {
+          cardStatus = 'Today';
+        } else if (aptDate < todayIso) {
+          cardStatus = 'Missed';
+        }
+
+        let resolvedCatName = '';
+        if (p.treatmentCategoryId) {
+          const catIdStr = String(p.treatmentCategoryId?._id || p.treatmentCategoryId);
+          const found = categories.find(c => String(c.id || c._id) === catIdStr);
+          if (found) resolvedCatName = found.name;
+        }
+        if (!resolvedCatName) {
+          resolvedCatName = p.treatmentCategoryName || p.categoryName || apt?.treatmentCategoryName || existing.categoryName || 'General Consultation';
+        }
+        const catName = normalizeCategoryName(resolvedCatName);
+
+        const card = {
+          ...existing,
+          id: pId || existing.id || `pat-${Date.now()}`,
+          patientName: p.name || existing.patientName || 'Patient',
+          patientPhone: p.phone || existing.patientPhone || '9876543210',
+          age: p.age || existing.age || 30,
+          gender: p.gender ? (p.gender.charAt(0).toUpperCase() + p.gender.slice(1).toLowerCase()) : (existing.gender || 'Male'),
+          bloodGroup: p.bloodGroup || existing.bloodGroup || 'O+',
+          email: p.email || existing.email || '',
+          address: p.address || existing.address || 'Dwarka, New Delhi',
+          emergencyContact: p.emergencyContact || existing.emergencyContact || { name: 'Guardian', relation: 'Family', phone: p.phone },
+          chiefComplaint: p.chiefComplaint || apt?.notes || existing.chiefComplaint || 'Dental Treatment',
+          allergies: Array.isArray(p.allergies) ? p.allergies.join(', ') : (p.allergies || existing.allergies || 'None'),
+          medicalHistory: p.medicalHistory || existing.medicalHistory || 'None',
+          doctorName: apt?.doctorName || p.doctorName || p.assignedDoctorName || existing.doctorName || 'Dr. Bhagwan Rakh',
+          date: aptDate,
+          categoryName: catName,
+          status: cardStatus,
+          totalFee: existing.totalFee || 15000,
+          amountPaid: existing.amountPaid || 0,
+          amountDue: existing.amountDue !== undefined ? existing.amountDue : (existing.totalFee || 15000),
+          paymentStatus: existing.paymentStatus || 'Pending',
+          nextAppointmentDays: existing.nextAppointmentDays || apt?.defaultFollowUpDays || 14,
+          paymentHistory: existing.paymentHistory || []
+        };
+
+        map.set(key, card);
+      });
+
+      // Also ensure standalone appointments appear as cards
+      // Skip: deleted patients, cancelled/completed appointments
+      apts.forEach(a => {
+        const idKey = (a.patientId || '').toLowerCase();
+        const phoneKey = (a.patientPhone || '').replace(/\D/g, '');
+        const nameKey = (a.patientName || '').toLowerCase().trim();
+
+        // Skip if patient was deleted or appointment is cancelled/completed
+        if (isPatientDeleted(a.patientId, a.patientPhone, a.patientName)) return;
+        if (['cancelled', 'completed', 'rescheduled'].includes(a.status) && !map.has(idKey) && !map.has(phoneKey)) return;
+
+        if (!map.has(idKey) && !map.has(phoneKey) && !map.has(nameKey)) {
+          let cardStatus = 'Upcoming';
+          if (a.date === todayIso || a.status === 'arrived' || a.status === 'in_progress') {
+            cardStatus = 'Today';
+          } else if (a.status === 'missed' || (a.date < todayIso && !['completed', 'cancelled'].includes(a.status))) {
+            cardStatus = 'Missed';
+          } else if (a.status === 'completed') {
+            cardStatus = 'Completed';
+          }
+
+          const catName = normalizeCategoryName(a.treatmentCategoryName || 'General Consultation');
+
+          const newCard = {
+            id: a.id || `apt-${Date.now()}`,
+            patientName: a.patientName || 'Patient',
+            patientPhone: a.patientPhone || '9876543210',
+            age: 30,
+            gender: 'Male',
+            bloodGroup: 'O+',
+            email: '',
+            address: 'Dwarka, New Delhi',
+            chiefComplaint: a.notes || 'Dental Consultation',
+            allergies: 'None',
+            medicalHistory: 'None',
+            doctorName: a.doctorName || 'Dr. Bhagwan Rakh',
+            date: a.date || todayIso,
+            categoryName: catName,
+            status: cardStatus,
+            totalFee: 15000,
+            amountPaid: 0,
+            amountDue: 15000,
+            paymentStatus: 'Pending',
+            nextAppointmentDays: a.defaultFollowUpDays || 14,
+            paymentHistory: []
+          };
+
+          map.set((a.id || nameKey).toLowerCase(), newCard);
+        }
+      });
+
+    } catch (err) {
+      console.error('Error fetching backend patients/appointments:', err);
     }
-    fetchBackendPatients();
+
+    const finalList = Array.from(map.values());
+    setCards(finalList);
+
+    // Make sure all categories present on cards are in categories state
+    setCategories(prev => {
+      const existingNames = new Set(prev.map(c => normalizeCategoryName(c.name).toLowerCase()));
+      const added = [];
+      finalList.forEach(c => {
+        const norm = normalizeCategoryName(c.categoryName);
+        if (!existingNames.has(norm.toLowerCase())) {
+          existingNames.add(norm.toLowerCase());
+          added.push({ id: `cat-${norm.toLowerCase().replace(/\s+/g, '-')}`, name: norm, defaultFollowUpDays: 14 });
+        }
+      });
+      return added.length > 0 ? deduplicateCategories([...prev, ...added]) : prev;
+    });
+
+    try {
+      localStorage.setItem(CARDS_STORAGE_KEY, JSON.stringify(finalList));
+    } catch (_) {}
   }, []);
+
+  useEffect(() => {
+    loadAllCards();
+
+    const handleDataUpdate = (e) => {
+      if (e?.detail?.action === 'delete') {
+        const delId = e.detail.patientId;
+        const delMongoId = e.detail.mongoPatientId;
+        const delPhone = (e.detail.phone || '').replace(/\D/g, '');
+        const delName = (e.detail.name || '').toLowerCase().trim();
+        setCards(prev => prev.filter(c => {
+          if (delId && (c.id === delId || c._id === delId)) return false;
+          if (delMongoId && (c.id === delMongoId || c._id === delMongoId)) return false;
+          const cPhone = (c.patientPhone || c.phone || '').replace(/\D/g, '');
+          const cName = (c.patientName || c.name || '').toLowerCase().trim();
+          if (delPhone && cPhone && delPhone === cPhone) return false;
+          if (delName && cName && delName === cName) return false;
+          return true;
+        }));
+      } else if (e?.detail?.card) {
+        const newCard = e.detail.card;
+        const normCat = normalizeCategoryName(newCard.categoryName || newCard.treatmentCategoryName);
+        const cardWithNormCat = { ...newCard, categoryName: normCat };
+
+        setCards(prev => {
+          const cleanPhone = (cardWithNormCat.patientPhone || '').replace(/\D/g, '');
+          const filtered = prev.filter(c => {
+            if (c.id && cardWithNormCat.id && String(c.id).toLowerCase() === String(cardWithNormCat.id).toLowerCase()) return false;
+            const cPhone = (c.patientPhone || '').replace(/\D/g, '');
+            if (cleanPhone && cPhone && cleanPhone === cPhone) return false;
+            return true;
+          });
+          return [cardWithNormCat, ...filtered];
+        });
+
+        // Ensure category exists in categories state immediately
+        setCategories(prev => {
+          const exists = prev.some(c => normalizeCategoryName(c.name).toLowerCase() === normCat.toLowerCase());
+          if (!exists) {
+            return deduplicateCategories([...prev, { id: `cat-${normCat.toLowerCase().replace(/\s+/g, '-')}`, name: normCat, defaultFollowUpDays: 14 }]);
+          }
+          return prev;
+        });
+      }
+      loadAllCards();
+    };
+
+    window.addEventListener('storage', handleDataUpdate);
+    window.addEventListener('ddc_patient_data_updated', handleDataUpdate);
+    window.addEventListener('focus', handleDataUpdate);
+
+    // Periodic real-time background synchronization every 12s
+    const pollInterval = setInterval(() => {
+      loadAllCards();
+    }, 12000);
+
+    return () => {
+      window.removeEventListener('storage', handleDataUpdate);
+      window.removeEventListener('ddc_patient_data_updated', handleDataUpdate);
+      window.removeEventListener('focus', handleDataUpdate);
+      clearInterval(pollInterval);
+    };
+  }, [loadAllCards]);
 
   // Payment Form inside Modal
   const [newPaymentForm, setNewPaymentForm] = useState({
@@ -562,7 +865,7 @@ export default function CategoryBoardDashboard() {
       medicalHistory: patientForm.medicalHistory || 'None',
       doctorName: assignedDoc,
       date: nextDate,
-      categoryName: patientForm.categoryName,
+      categoryName: normalizeCategoryName(patientForm.categoryName),
       status: 'Upcoming',
       totalFee: total,
       amountPaid: paid,
@@ -576,7 +879,11 @@ export default function CategoryBoardDashboard() {
 
     setCards(prev => [newCard, ...prev]);
 
-    const targetCat = categories.find(c => c.name.toLowerCase() === patientForm.categoryName.toLowerCase());
+    const normTargetName = normalizeCategoryName(patientForm.categoryName).toLowerCase();
+    const targetCat = categories.find(c =>
+      normalizeCategoryName(c.name).toLowerCase() === normTargetName ||
+      (c.code && c.code.toLowerCase() === normTargetName)
+    );
     if (targetCat) {
       setExpandedCategories(prev => ({ ...prev, [targetCat.id]: true }));
     }
@@ -587,21 +894,32 @@ export default function CategoryBoardDashboard() {
       name: '', phone: '', age: 30, gender: 'Male', bloodGroup: 'O+', email: '', address: '',
       emergencyName: '', emergencyRelation: 'Father', emergencyPhone: '',
       chiefComplaint: '', allergies: 'None', medicalHistory: 'No prior conditions',
-      doctorSelect: 'Dr. Bhagwan Rakh', customDoctorName: '', categoryName: 'Orthodontic', totalFee: 30000, initialPayment: 5000, nextAppointmentDays: 28,
+      doctorSelect: 'Dr. Bhagwan Rakh', customDoctorName: '', categoryName: 'Root Canal Treatment', totalFee: 30000, initialPayment: 5000, nextAppointmentDays: 28,
     });
 
     try {
+      const catId = targetCat?.id || targetCat?._id;
+      const cleanCatName = normalizeCategoryName(targetCat?.name || newCard.categoryName);
+      const matchedStaff = staffDetails.find(s => s.name?.toLowerCase() === assignedDoc.toLowerCase());
+      const docId = matchedStaff?.id || matchedStaff?._id;
+
       await api.addPatient({
         name: newCard.patientName,
         phone: newCard.patientPhone,
         age: newCard.age,
-        gender: newCard.gender.toLowerCase(),
+        gender: (newCard.gender || 'male').toLowerCase(),
         email: newCard.email,
         address: newCard.address,
         emergencyContact: newCard.emergencyContact,
         bloodGroup: newCard.bloodGroup,
         chiefComplaint: newCard.chiefComplaint,
         medicalHistory: newCard.medicalHistory,
+        treatmentCategoryId: catId,
+        treatmentCategoryName: cleanCatName,
+        categoryName: cleanCatName,
+        assignedDoctorId: docId,
+        appointmentDate: newCard.date,
+        appointmentTime: '10:00',
       }).catch(() => null);
     } catch (e) {
       console.error(e);
@@ -671,10 +989,107 @@ export default function CategoryBoardDashboard() {
     }
   }
 
-  function handleDeletePatientConfirm() {
+  async function handleDeletePatientConfirm() {
     if (!deleteConfirmId) return;
-    setCards(prev => prev.filter(c => c.id !== deleteConfirmId));
+    const idToDelete = deleteConfirmId;
     setDeleteConfirmId(null);
+
+    // Find the card being deleted to know its phone, name, mongoId etc.
+    const cardToDelete = cards.find(c => c.id === idToDelete);
+    const phoneClean = (cardToDelete?.patientPhone || '').replace(/\D/g, '');
+    const nameClean = (cardToDelete?.patientName || '').toLowerCase().trim();
+
+    // 1. Remove from in-memory cards immediately
+    setCards(prev => prev.filter(c => {
+      if (c.id === idToDelete) return false;
+      const cPhone = (c.patientPhone || '').replace(/\D/g, '');
+      const cName = (c.patientName || '').toLowerCase().trim();
+      if (phoneClean && cPhone && cPhone === phoneClean) return false;
+      if (nameClean && cName && cName === nameClean) return false;
+      return true;
+    }));
+
+    // 2. Remove from all possible localStorage card keys
+    const storageKeys = ['ddc_patient_cards_v2', 'ddc_patient_cards_v1', 'ddc_patient_cards', 'dwarka_patients', 'patients'];
+    storageKeys.forEach(k => {
+      try {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr)) {
+            const filtered = arr.filter(c => {
+              const cId = c.id || c._id;
+              const cPhone = (c.patientPhone || c.phone || '').replace(/\D/g, '');
+              const cName = (c.patientName || c.name || '').toLowerCase().trim();
+              if (cId === idToDelete) return false;
+              if (phoneClean && cPhone && cPhone === phoneClean) return false;
+              if (nameClean && cName && cName === nameClean) return false;
+              return true;
+            });
+            localStorage.setItem(k, JSON.stringify(filtered));
+          }
+        }
+      } catch (_) {}
+    });
+
+    // 3. Track deleted patient ID in 'ddc_deleted_patients' (never block phones or names)
+    try {
+      const deletedArr = JSON.parse(localStorage.getItem('ddc_deleted_patients') || '[]');
+      const toAdd = [String(idToDelete).toLowerCase()];
+      toAdd.forEach(item => {
+        if (!deletedArr.includes(item)) deletedArr.push(item);
+      });
+      localStorage.setItem('ddc_deleted_patients', JSON.stringify(deletedArr));
+    } catch (_) {}
+
+    // 4. Soft-delete patient + their appointments on backend
+    let mongoPatientId = /^[a-f0-9]{24}$/i.test(String(idToDelete || '')) ? idToDelete : null;
+    try {
+      // If idToDelete is not a 24-hex mongo ID, try to match by phone or name
+      if (!mongoPatientId && (phoneClean || nameClean)) {
+        const patsRes = await api.getPatients({ limit: 500 }).catch(() => null);
+        const pats = patsRes?.data?.data || patsRes?.data?.patients || (Array.isArray(patsRes?.data) ? patsRes.data : []);
+        const match = pats.find(p => {
+          const pPhone = (p.phone || '').replace(/\D/g, '');
+          const pName = (p.name || '').toLowerCase().trim();
+          return (phoneClean && pPhone === phoneClean) || (nameClean && pName === nameClean);
+        });
+        if (match) {
+          mongoPatientId = match.id || match._id;
+        }
+      }
+
+      if (mongoPatientId) {
+        // Record mongo ID in deleted list too
+        try {
+          const deletedArr = JSON.parse(localStorage.getItem('ddc_deleted_patients') || '[]');
+          if (!deletedArr.includes(String(mongoPatientId))) {
+            deletedArr.push(String(mongoPatientId));
+            localStorage.setItem('ddc_deleted_patients', JSON.stringify(deletedArr));
+          }
+        } catch (_) {}
+
+        await api.deletePatient(mongoPatientId);
+        // Also cancel appointments for this patient so they don't reappear as cards
+        const aptsRes = await api.getAppointmentsByPatient(mongoPatientId).catch(() => null);
+        const aptList = aptsRes?.data?.data || aptsRes?.data || [];
+        if (Array.isArray(aptList)) {
+          for (const a of aptList) {
+            if (a.id && !['completed', 'cancelled'].includes(a.status)) {
+              await api.updateAppointmentStatus(a.id, { status: 'cancelled' }).catch(() => {});
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Backend delete error:', err);
+    } finally {
+      // 5. Broadcast real-time update event so PatientsPage and AppointmentsPage refresh instantly
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new CustomEvent('ddc_patient_data_updated', {
+        detail: { action: 'delete', patientId: idToDelete, mongoPatientId, phone: phoneClean, name: nameClean }
+      }));
+    }
   }
 
   function handleEditPatientClick(card) {
@@ -739,6 +1154,10 @@ export default function CategoryBoardDashboard() {
     }
 
     setEditPatientCard(null);
+    window.dispatchEvent(new Event('storage'));
+    window.dispatchEvent(new CustomEvent('ddc_patient_data_updated', {
+      detail: { action: 'update', patientId: editPatientCard.id }
+    }));
   }
 
   function handleAddPaymentHistory(e) {
@@ -876,10 +1295,28 @@ export default function CategoryBoardDashboard() {
     } : c));
 
     setRescheduleModalCard(null);
+    window.dispatchEvent(new Event('storage'));
+    window.dispatchEvent(new CustomEvent('ddc_patient_data_updated', {
+      detail: { action: 'reschedule', patientId: rescheduleModalCard.id }
+    }));
   }
 
-  // Comprehensive Fuzzy Patient Search Filter
+  const todayIso = new Date().toISOString().split('T')[0];
+  const todayCount = cards.filter(c => (c.status || '').toLowerCase() === 'today' || c.date === todayIso).length;
+  const missedCount = cards.filter(c => (c.status || '').toLowerCase() === 'missed' || (c.date < todayIso && (c.status || '').toLowerCase() !== 'completed')).length;
+
+  // Comprehensive Status & Fuzzy Patient Search Filter
   const filteredCards = cards.filter(c => {
+    // 1. Status metric filter
+    if (statusFilter === 'TODAY') {
+      const isToday = (c.status || '').toLowerCase() === 'today' || c.date === todayIso;
+      if (!isToday) return false;
+    } else if (statusFilter === 'MISSED') {
+      const isMissed = (c.status || '').toLowerCase() === 'missed' || (c.date < todayIso && (c.status || '').toLowerCase() !== 'completed');
+      if (!isMissed) return false;
+    }
+
+    // 2. Query search filter
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase().trim();
     const cleanPhone = (c.patientPhone || '').replace(/\D/g, '');
@@ -891,8 +1328,21 @@ export default function CategoryBoardDashboard() {
     const catMatch = (c.categoryName || '').toLowerCase().includes(q);
     const complaintMatch = (c.chiefComplaint || '').toLowerCase().includes(q);
     const emergencyMatch = (c.emergencyContact?.name || '').toLowerCase().includes(q) || (c.emergencyContact?.phone || '').includes(q);
+    const statusMatch = (c.status || '').toLowerCase() === q || (c.status || '').toLowerCase().includes(q);
 
-    return nameMatch || phoneMatch || doctorMatch || catMatch || complaintMatch || emergencyMatch;
+    return nameMatch || phoneMatch || doctorMatch || catMatch || complaintMatch || emergencyMatch || statusMatch;
+  });
+
+  const filteredStaffBoard = staffDetails.filter(s => {
+    if (!searchQuery.trim()) return false;
+    const q = searchQuery.toLowerCase().trim();
+    return (
+      (s.name || '').toLowerCase().includes(q) ||
+      (s.email || '').toLowerCase().includes(q) ||
+      (s.role || '').toLowerCase().includes(q) ||
+      (s.specialization || '').toLowerCase().includes(q) ||
+      (s.phone || '').toLowerCase().includes(q)
+    );
   });
 
   function sortCards(cardList) {
@@ -924,7 +1374,7 @@ export default function CategoryBoardDashboard() {
 
         <div className="flex flex-wrap items-center gap-3">
           <button
-            onClick={() => { setAddPatientModalOpen(true); setRegStep(1); }}
+            onClick={() => navigate(isAdmin ? '/admin/register' : '/receptionist/register')}
             className="btn bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white px-4 py-2.5 text-xs font-semibold flex items-center gap-2 shadow-xs rounded-xl cursor-pointer transition-colors"
           >
             <Plus size={16} />
@@ -959,43 +1409,91 @@ export default function CategoryBoardDashboard() {
 
       {/* Executive Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-        <div className="card p-5 bg-white border border-slate-200 rounded-2xl flex items-center justify-between shadow-2xs hover:shadow-xs transition-shadow">
+        <div
+          onClick={() => handleFilterClick('ALL')}
+          className={`card p-5 bg-white border rounded-2xl flex items-center justify-between shadow-2xs hover:shadow-md transition-all cursor-pointer ${
+            statusFilter === 'ALL'
+              ? 'border-[var(--color-primary-500)] ring-2 ring-[var(--color-primary-200)] bg-blue-50/20'
+              : 'border-slate-200 hover:border-[var(--color-primary-400)]'
+          }`}
+          title="Click to view all patients"
+        >
           <div>
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Patients</p>
             <p className="text-3xl font-black text-slate-900 mt-1">{cards.length}</p>
-            <span className="text-[11px] text-emerald-600 font-medium mt-1 inline-block">Active In-Treatment</span>
+            <span className={`text-[11px] font-medium mt-1 inline-block ${statusFilter === 'ALL' ? 'text-[var(--color-primary-700)] font-bold' : 'text-emerald-600'}`}>
+              {statusFilter === 'ALL' ? '● Showing All Patients' : 'Active In-Treatment'}
+            </span>
           </div>
           <div className="w-12 h-12 rounded-xl bg-blue-50 text-[var(--color-primary-500)] border border-blue-100 flex items-center justify-center">
             <Users size={22} />
           </div>
         </div>
 
-        <div className="card p-5 bg-white border border-slate-200 rounded-2xl flex items-center justify-between shadow-2xs hover:shadow-xs transition-shadow">
+        <div
+          onClick={() => handleFilterClick('TODAY')}
+          className={`card p-5 bg-white border rounded-2xl flex items-center justify-between shadow-2xs hover:shadow-md transition-all cursor-pointer ${
+            statusFilter === 'TODAY'
+              ? 'border-amber-500 ring-2 ring-amber-300 bg-amber-50/50 shadow-sm'
+              : 'border-slate-200 hover:border-amber-400'
+          }`}
+          title="Click to filter Today's Appointments"
+        >
           <div>
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Today's Appointments</p>
             <p className="text-3xl font-black text-slate-900 mt-1">
-              {cards.filter(c => c.status === 'Today').length}
+              {todayCount}
             </p>
-            <span className="text-[11px] text-amber-600 font-medium mt-1 inline-block">Scheduled for Today</span>
+            <span className={`text-[11px] font-medium mt-1 inline-block ${statusFilter === 'TODAY' ? 'text-amber-800 font-bold' : 'text-amber-600'}`}>
+              {statusFilter === 'TODAY' ? "● Filter Active: Today's Visits" : "Click to Filter Today's Visit"}
+            </span>
           </div>
           <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 border border-amber-100 flex items-center justify-center">
             <Clock size={22} />
           </div>
         </div>
 
-        <div className="card p-5 bg-white border border-slate-200 rounded-2xl flex items-center justify-between shadow-2xs hover:shadow-xs transition-shadow">
+        <div
+          onClick={() => handleFilterClick('MISSED')}
+          className={`card p-5 bg-white border rounded-2xl flex items-center justify-between shadow-2xs hover:shadow-md transition-all cursor-pointer ${
+            statusFilter === 'MISSED'
+              ? 'border-rose-500 ring-2 ring-rose-300 bg-rose-50/50 shadow-sm'
+              : 'border-slate-200 hover:border-rose-400'
+          }`}
+          title="Click to filter Missed Appointments"
+        >
           <div>
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Missed Appointments</p>
             <p className="text-3xl font-black text-slate-900 mt-1">
-              {cards.filter(c => c.status === 'Missed').length}
+              {missedCount}
             </p>
-            <span className="text-[11px] text-rose-600 font-medium mt-1 inline-block">Requires Follow-up</span>
+            <span className={`text-[11px] font-medium mt-1 inline-block ${statusFilter === 'MISSED' ? 'text-rose-800 font-bold' : 'text-rose-600'}`}>
+              {statusFilter === 'MISSED' ? "● Filter Active: Missed Visits" : "Requires Follow-up"}
+            </span>
           </div>
           <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 border border-rose-100 flex items-center justify-center">
             <AlertTriangle size={22} />
           </div>
         </div>
       </div>
+
+      {/* ACTIVE STATUS FILTER BANNER */}
+      {statusFilter !== 'ALL' && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs text-amber-900 font-medium animate-fade-in shadow-2xs">
+          <div className="flex items-center gap-2">
+            <span className="text-base">{statusFilter === 'TODAY' ? '📅' : '⚠️'}</span>
+            <span>
+              Showing: <strong className="font-bold">{statusFilter === 'TODAY' ? "Today's Patient Appointments" : "Missed Patient Appointments"}</strong> ({filteredCards.length} patient record{filteredCards.length === 1 ? '' : 's'} across {uniqueCategories.filter(cat => filteredCards.some(c => normalizeCategoryName(c.categoryName).toLowerCase() === normalizeCategoryName(cat.name).toLowerCase())).length} categor{uniqueCategories.filter(cat => filteredCards.some(c => normalizeCategoryName(c.categoryName).toLowerCase() === normalizeCategoryName(cat.name).toLowerCase())).length === 1 ? 'y' : 'ies'})
+            </span>
+          </div>
+          <button
+            onClick={() => handleFilterClick('ALL')}
+            className="btn btn-xs bg-white text-amber-900 border border-amber-300 hover:bg-amber-100 font-bold px-3 py-1.5 rounded-lg cursor-pointer transition-colors shadow-2xs"
+          >
+            ✕ Show All Patients ({cards.length})
+          </button>
+        </div>
+      )}
 
       {/* SEARCH BAR & CONTROL BAR */}
       <div className="card p-4 bg-white border border-slate-200 rounded-2xl flex flex-wrap items-center justify-between gap-4 shadow-2xs">
@@ -1053,16 +1551,44 @@ export default function CategoryBoardDashboard() {
 
       {/* ACTIVE SEARCH RESULTS BANNER */}
       {searchQuery.trim() && (
-        <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between text-xs text-blue-900 font-medium">
-          <span>
-            🔍 Showing search results for <strong>"{searchQuery}"</strong> ({filteredCards.length} matching patient(s))
-          </span>
-          <button
-            onClick={() => handleSearchChange('')}
-            className="text-xs font-bold text-blue-600 hover:underline cursor-pointer"
-          >
-            Clear Search
-          </button>
+        <div className="space-y-3">
+          <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between text-xs text-blue-900 font-medium">
+            <span>
+              🔍 Showing search results for <strong>"{searchQuery}"</strong> ({filteredCards.length} matching patient(s), {filteredStaffBoard.length} matching staff)
+            </span>
+            <button
+              onClick={() => handleSearchChange('')}
+              className="text-xs font-bold text-blue-600 hover:underline cursor-pointer"
+            >
+              Clear Search
+            </button>
+          </div>
+
+          {/* MATCHING STAFF MEMBERS SECTION */}
+          {filteredStaffBoard.length > 0 && (
+            <div className="card p-4 bg-white border border-slate-200 rounded-xl space-y-2 shadow-2xs">
+              <h4 className="font-bold text-xs uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                <Users size={15} className="text-[var(--color-primary-600)]" />
+                Matching Doctors & Staff ({filteredStaffBoard.length})
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+                {filteredStaffBoard.map(s => (
+                  <div key={s.id || s.email} className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-slate-900">{s.name}</span>
+                        <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-700">{s.role}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        {s.specialization ? `${s.specialization} · ` : ''}{s.email}
+                      </p>
+                    </div>
+                    {s.phone && <p className="text-[11px] text-slate-600 font-medium mt-1">📞 {s.phone}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1072,14 +1598,14 @@ export default function CategoryBoardDashboard() {
           const categoryCards = sortCards(filteredCards.filter(c => {
             const cCat = normalizeCategoryName(c.categoryName).toLowerCase();
             const catName = normalizeCategoryName(category.name).toLowerCase();
-            return cCat === catName || cCat.includes(catName) || catName.includes(cCat);
+            return cCat === catName;
           }));
 
-          const isExpanded = !!expandedCategories[category.id] || searchQuery.trim().length > 0;
+          const isExpanded = !!expandedCategories[category.id] || (statusFilter !== 'ALL' && categoryCards.length > 0) || (searchQuery.trim().length > 0 && categoryCards.length > 0);
           const theme = CATEGORY_THEMES[category.name] || CATEGORY_THEMES['default'];
           const totalCategoryDue = categoryCards.reduce((acc, curr) => acc + (curr.amountDue || 0), 0);
 
-          if (searchQuery.trim() && categoryCards.length === 0) {
+          if ((searchQuery.trim() || statusFilter !== 'ALL') && categoryCards.length === 0) {
             return null;
           }
 
@@ -1111,8 +1637,23 @@ export default function CategoryBoardDashboard() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5">
                   <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const targetRoute = isAdmin ? '/admin/register' : '/receptionist/register';
+                      navigate(`${targetRoute}?category=${encodeURIComponent(category.name)}`);
+                    }}
+                    className="btn btn-outline border-slate-300 hover:border-[var(--color-primary-500)] hover:bg-slate-100 text-slate-700 hover:text-[var(--color-primary-700)] font-semibold text-xs px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                    title={`Register new patient under ${category.name}`}
+                  >
+                    <Plus size={14} className="text-[var(--color-primary-600)]" />
+                    <span>+ Register Patient</span>
+                  </button>
+
+                  <button
+                    type="button"
                     className="btn bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs px-3.5 py-2 rounded-xl transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
                   >
                     <span>{isExpanded ? 'Hide Patients' : `View Patients (${categoryCards.length})`}</span>
@@ -1126,7 +1667,17 @@ export default function CategoryBoardDashboard() {
                 <div className="p-5 bg-slate-50/70 border-t border-slate-100 animate-fade-in space-y-4">
                   {categoryCards.length === 0 ? (
                     <div className="p-8 text-center text-xs text-slate-500 bg-white rounded-xl border border-dashed border-slate-200">
-                      No patients registered under {category.name}. Click "+ Register Patient" above.
+                      <p className="mb-2">No patients registered under {category.name}.</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetRoute = isAdmin ? '/admin/register' : '/receptionist/register';
+                          navigate(`${targetRoute}?category=${encodeURIComponent(category.name)}`);
+                        }}
+                        className="btn btn-sm bg-[var(--color-primary-500)] hover:bg-[var(--color-primary-600)] text-white text-xs font-semibold inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer"
+                      >
+                        <Plus size={14} /> Register Patient for {category.name}
+                      </button>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1155,7 +1706,7 @@ export default function CategoryBoardDashboard() {
                                   </div>
                                 </div>
 
-                                {!isAdmin && (
+                                {(isAdmin || userRole === 'receptionist') && (
                                   <div className="flex items-center gap-1">
                                     <button
                                       onClick={() => handleEditPatientClick(card)}
@@ -1725,7 +2276,7 @@ export default function CategoryBoardDashboard() {
               </table>
             </div>
 
-            {!isAdmin && (
+            {(isAdmin || userRole === 'receptionist') && (
               <form onSubmit={handleAddPaymentHistory} className="p-4 rounded-xl bg-blue-50/60 border border-blue-200 space-y-3">
                 <p className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
                   <DollarSign size={14} /> Record Payment by Date:

@@ -27,9 +27,11 @@ const updateStatus = asyncHandler(async (req, res) => {
   return new ApiResponse(200, result, 'Appointment updated').send(res);
 });
 
-/** DELETE /api/appointments/:id — soft-delete (Admin only) */
+/** DELETE /api/appointments/:id — soft-delete (Admin and Receptionist) */
 const softDelete = asyncHandler(async (req, res) => {
-  if (req.user.role !== 'admin') throw ApiError.forbidden('Admin-only action.');
+  if (!['admin', 'receptionist'].includes(req.user?.role)) {
+    throw ApiError.forbidden('Admin or Receptionist role required.');
+  }
   await appointmentService.softDeleteAppointment(req.params.id);
   return new ApiResponse(200, null, 'Appointment deleted').send(res);
 });

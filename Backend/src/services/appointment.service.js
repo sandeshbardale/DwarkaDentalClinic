@@ -38,7 +38,7 @@ async function getAllAppointments(query = {}) {
     sortBy = 'startAt',
     sortOrder = 'asc',
     page = 1,
-    limit = 50,
+    limit = 200,
   } = query;
 
   const now = new Date();
@@ -52,23 +52,33 @@ async function getAllAppointments(query = {}) {
     filter.startAt = { $gte: todayStart, $lte: todayEnd };
     filter.status = { $nin: ['cancelled'] };
   } else if (view === 'missed') {
-    filter.startAt = { $lt: todayStart }; // before today
-    filter.status = { $in: ['scheduled', 'confirmed', 'arrived'] };
+    filter.$or = [
+      { status: 'missed' },
+      { startAt: { $lt: todayStart }, status: { $in: ['scheduled', 'confirmed', 'arrived'] } }
+    ];
   } else if (view === 'upcoming') {
-    filter.startAt = { $gt: todayEnd }; // after today
+    filter.startAt = { $gte: todayStart }; // today and future
     filter.status = { $in: ['scheduled', 'confirmed'] };
   }
 
   // ── Manual filters ──────────────────────────────────────────────────────────
-  if (status) filter.status = status;
-  if (priority) filter.priority = priority;
+  if (status && status !== 'all' && status !== 'ALL') filter.status = status;
+  if (priority && priority !== 'all' && priority !== 'ALL') filter.priority = priority;
 
   const mongoose = require('mongoose');
   if (doctorId && mongoose.Types.ObjectId.isValid(doctorId)) {
     filter.doctorId = new mongoose.Types.ObjectId(doctorId);
   }
-  if (categoryId && mongoose.Types.ObjectId.isValid(categoryId)) {
-    filter.treatmentCategoryId = new mongoose.Types.ObjectId(categoryId);
+  if (categoryId && categoryId !== 'all' && categoryId !== 'ALL') {
+    if (mongoose.Types.ObjectId.isValid(categoryId)) {
+      filter.treatmentCategoryId = new mongoose.Types.ObjectId(categoryId);
+    } else {
+      const TreatmentCategory = require('../models/treatment-category.model');
+      const foundCat = await TreatmentCategory.findOne({
+        $or: [{ code: String(categoryId).toUpperCase() }, { name: new RegExp(`^${categoryId}$`, 'i') }]
+      });
+      if (foundCat) filter.treatmentCategoryId = foundCat._id;
+    }
   }
   if (date) {
     const d = new Date(date);
@@ -88,12 +98,27 @@ async function getAllAppointments(query = {}) {
   const sortDir = sortOrder === 'desc' ? -1 : 1;
 
   const pageNum = Math.max(1, parseInt(page));
-  const pageLimit = Math.min(200, Math.max(1, parseInt(limit)));
+  const parsedLimit = limit === 'all' ? 1000 : parseInt(limit || 200);
+  const pageLimit = Math.min(1000, Math.max(1, isNaN(parsedLimit) ? 200 : parsedLimit));
   const skip = (pageNum - 1) * pageLimit;
+
+  const Patient = require('../models/patient.model');
+  const deletedPatients = await Patient.find({ isDeleted: true }).distinct('_id');
+  if (deletedPatients.length > 0) {
+    if (filter.patientId) {
+      filter.$and = [
+        { patientId: filter.patientId },
+        { patientId: { $nin: deletedPatients } }
+      ];
+      delete filter.patientId;
+    } else {
+      filter.patientId = { $nin: deletedPatients };
+    }
+  }
 
   const [appointments, total] = await Promise.all([
     Appointment.find(filter)
-      .populate('patientId', 'name patientNumber phone')
+      .populate('patientId', 'name patientNumber phone isDeleted')
       .populate('doctorId', 'name specialization')
       .populate('treatmentCategoryId', 'name code defaultDurationMinutes defaultFollowUpDays')
       .sort({ [sortField]: sortDir })
@@ -103,9 +128,15 @@ async function getAllAppointments(query = {}) {
     Appointment.countDocuments(filter),
   ]);
 
+  const validAppointments = appointments.filter(a => {
+    if (!a.patientId) return false;
+    if (typeof a.patientId === 'object' && a.patientId.isDeleted) return false;
+    return true;
+  });
+
   return {
-    data: appointments.map(toFrontendShape),
-    pagination: { page: pageNum, limit: pageLimit, total, totalPages: Math.ceil(total / pageLimit) },
+    data: validAppointments.map(toFrontendShape),
+    pagination: { page: pageNum, limit: pageLimit, total: validAppointments.length, totalPages: Math.ceil(validAppointments.length / pageLimit) },
   };
 }
 
@@ -324,20 +355,20 @@ function toFrontendShape(a) {
   return {
     id: a._id.toString(),
     appointmentNumber: a.appointmentNumber,
-    patientId: patient ? patient._id.toString() : a.patientId?.toString(),
-    patientName: patient ? patient.name : '',
-    patientNumber: patient ? patient.patientNumber : '',
-    patientPhone: patient ? patient.phone : '',
-    doctorId: doctor ? doctor._id.toString() : a.doctorId?.toString(),
-    doctorName: doctor ? doctor.name : '',
-    doctorSpecialization: doctor ? doctor.specialization : '',
-    treatmentCategoryId: category ? category._id.toString() : (a.treatmentCategoryId?.toString() || null),
-    treatmentCategoryName: category ? category.name : '',
-    treatmentCategoryCode: category ? category.code : '',
-    defaultDurationMinutes: category ? category.defaultDurationMinutes : null,
-    defaultFollowUpDays: category ? category.defaultFollowUpDays : null,
-    date: startAt ? startAt.toISOString().split('T')[0] : null,
-    time: startAt ? startAt.toTimeString().slice(0, 5) : null,
+    patientId: patient ? patient._id.toString() : (a.patientId ? a.patientId.toString() : ''),
+    patientName: patient?.name || a.patientName || '',
+    patientNumber: patient?.patientNumber || a.patientNumber || '',
+    patientPhone: patient?.phone || a.patientPhone || '',
+    doctorId: doctor ? doctor._id.toString() : (a.doctorId ? a.doctorId.toString() : ''),
+    doctorName: doctor?.name || a.doctorName || '',
+    doctorSpecialization: doctor?.specialization || a.doctorSpecialization || '',
+    treatmentCategoryId: category ? category._id.toString() : (a.treatmentCategoryId ? a.treatmentCategoryId.toString() : null),
+    treatmentCategoryName: category?.name || a.treatmentCategoryName || 'General Consultation',
+    treatmentCategoryCode: category?.code || a.treatmentCategoryCode || 'CONSULT',
+    defaultDurationMinutes: category?.defaultDurationMinutes || a.defaultDurationMinutes || a.durationMinutes || 30,
+    defaultFollowUpDays: category?.defaultFollowUpDays || a.defaultFollowUpDays || 30,
+    date: a.date || (startAt ? startAt.toISOString().split('T')[0] : null),
+    time: a.time || (startAt ? startAt.toTimeString().slice(0, 5) : null),
     startAt: a.startAt,
     endAt: a.endAt,
     durationMinutes: a.durationMinutes,

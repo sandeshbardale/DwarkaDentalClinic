@@ -13,8 +13,10 @@ function usePageTitle() {
   const { pathname } = useLocation();
   const segments = pathname.split('/').filter(Boolean);
   if (segments.length < 2) return 'Dashboard';
+  if (segments.includes('patients') && segments.length >= 3) {
+    return 'Patient Profile';
+  }
   const last = segments[segments.length - 1];
-  if (/^[A-Z0-9\-]+$/.test(last)) return 'Detail';
   return last
     .split('-')
     .map(w => w.charAt(0).toUpperCase() + w.slice(1))

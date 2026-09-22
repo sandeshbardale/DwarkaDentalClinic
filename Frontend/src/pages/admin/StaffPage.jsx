@@ -6,10 +6,14 @@ import Avatar from '../../components/ui/Avatar';
 import { formatDate } from '../../utils/formatters';
 import Modal, { ConfirmModal } from '../../components/ui/Modal';
 import { api } from '../../utils/api';
+import { useAuth } from '../../hooks/useAuth';
 
 const ROLE_LABELS = { receptionist: 'Receptionist', doctor: 'Doctor', assistant: 'Dental Assistant', lab_technician: 'Lab Technician', admin: 'Admin' };
 
 export default function StaffPage() {
+  const { role } = useAuth();
+  const isAdmin = role === 'admin';
+
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmId, setConfirmId] = useState(null);
@@ -119,9 +123,11 @@ export default function StaffPage() {
           <button onClick={loadStaff} className="btn btn-outline btn-sm flex items-center gap-1">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
           </button>
-          <button onClick={handleAddClick} className="btn btn-primary btn-sm flex items-center gap-1.5 font-semibold">
-            <Plus size={16} /> Add Staff Member
-          </button>
+          {isAdmin && (
+            <button onClick={handleAddClick} className="btn btn-primary btn-sm flex items-center gap-1.5 font-semibold cursor-pointer">
+              <Plus size={16} /> Add Staff Member
+            </button>
+          )}
         </div>
       </div>
 
@@ -135,7 +141,7 @@ export default function StaffPage() {
               <th>Email</th>
               <th>Specialization / Shift</th>
               <th>Status</th>
-              <th className="text-right">Actions</th>
+              {isAdmin && <th className="text-right">Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -157,25 +163,27 @@ export default function StaffPage() {
                   <td className="text-sm text-[var(--color-text-muted)]">{s.email}</td>
                   <td className="text-sm text-[var(--color-text-muted)]">{s.specialization || s.shift || 'General'}</td>
                   <td><StatusBadge status={s.status} /></td>
-                  <td className="text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        onClick={() => handleEditClick(s)}
-                        className="btn btn-outline btn-xs flex items-center gap-1 text-[var(--color-primary-600)] cursor-pointer"
-                        title="Edit Staff Name & Details"
-                      >
-                        <Edit3 size={12} /> Edit
-                      </button>
-                      <button
-                        onClick={() => setConfirmId(memberId)}
-                        className={`text-xs px-2 h-6 rounded-md border font-medium cursor-pointer transition-colors ${
-                          s.status === 'active' ? 'border-red-200 text-red-500 hover:bg-red-50' : 'border-emerald-200 text-emerald-600 hover:bg-emerald-50'
-                        }`}
-                      >
-                        {s.status === 'active' ? 'Deactivate' : 'Activate'}
-                      </button>
-                    </div>
-                  </td>
+                  {isAdmin && (
+                    <td className="text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => handleEditClick(s)}
+                          className="btn btn-outline btn-xs flex items-center gap-1 text-[var(--color-primary-600)] cursor-pointer"
+                          title="Edit Staff Name & Details"
+                        >
+                          <Edit3 size={12} /> Edit
+                        </button>
+                        <button
+                          onClick={() => setConfirmId(memberId)}
+                          className={`text-xs px-2 h-6 rounded-md border font-medium cursor-pointer transition-colors ${
+                            s.status === 'active' ? 'border-red-200 text-red-500 hover:bg-red-50' : 'border-emerald-200 text-emerald-600 hover:bg-emerald-50'
+                          }`}
+                        >
+                          {s.status === 'active' ? 'Deactivate' : 'Activate'}
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               );
             })}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { FileText, RefreshCw, Search } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { FileText, RefreshCw, Search, X } from 'lucide-react';
 import { formatDate } from '../../utils/formatters';
 import EmptyState from '../../components/ui/EmptyState';
 import { api } from '../../utils/api';
@@ -7,13 +8,27 @@ import { useAuth } from '../../hooks/useAuth';
 
 export default function DoctorHistoryPage() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const qFromUrl = searchParams.get('q') || '';
+
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState(qFromUrl);
+  const [searchInput, setSearchInput] = useState(qFromUrl);
 
   useEffect(() => {
-    const t = setTimeout(() => setSearch(searchInput), 400);
+    const q = searchParams.get('q') || '';
+    setSearchInput(q);
+    setSearch(q);
+  }, [searchParams]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearch(searchInput);
+      if (searchInput.trim()) {
+        setSearchParams({ q: searchInput.trim() }, { replace: true });
+      }
+    }, 400);
     return () => clearTimeout(t);
   }, [searchInput]);
 
@@ -67,6 +82,19 @@ export default function DoctorHistoryPage() {
           onChange={e => setSearchInput(e.target.value)}
           className="flex-1 text-sm bg-transparent outline-none text-[var(--color-text)]"
         />
+        {searchInput && (
+          <button
+            onClick={() => {
+              setSearchInput('');
+              setSearch('');
+              setSearchParams({}, { replace: true });
+            }}
+            className="text-xs font-bold text-slate-400 hover:text-slate-600 px-1 cursor-pointer"
+            title="Clear search"
+          >
+            <X size={15} />
+          </button>
+        )}
       </div>
 
       <div className="card overflow-hidden">

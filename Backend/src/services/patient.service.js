@@ -2,6 +2,7 @@ const Patient = require('../models/patient.model');
 const Appointment = require('../models/appointment.model');
 const User = require('../models/user.model');
 const Clinic = require('../models/clinic.model');
+const TreatmentCategory = require('../models/treatment-category.model');
 const ApiError = require('../utils/ApiError');
 
 async function getDefaultClinic() {
@@ -31,16 +32,19 @@ async function getDefaultClinic() {
     sortBy = 'registeredAt',
     sortOrder = 'desc',
     page = 1,
-    limit = 20,
+    limit = 200,
   } = query;
 
   const filter = { isDeleted: false };
 
-  if (search) {
+  if (search && search.trim()) {
+    const s = search.trim();
     filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { phone: { $regex: search, $options: 'i' } },
-      { patientNumber: { $regex: search, $options: 'i' } },
+      { name: { $regex: s, $options: 'i' } },
+      { phone: { $regex: s, $options: 'i' } },
+      { patientNumber: { $regex: s, $options: 'i' } },
+      { email: { $regex: s, $options: 'i' } },
+      { chiefComplaint: { $regex: s, $options: 'i' } },
     ];
   }
   if (status) filter.status = status;
@@ -50,12 +54,25 @@ async function getDefaultClinic() {
     filter.assignedDoctorId = new mongoose.Types.ObjectId(doctorId);
   }
 
-  if (categoryId && mongoose.Types.ObjectId.isValid(categoryId)) {
-    const matchingApts = await Appointment.find({
-      treatmentCategoryId: new mongoose.Types.ObjectId(categoryId),
-      isDeleted: false,
-    }).distinct('patientId');
-    filter._id = { $in: matchingApts };
+  if (categoryId) {
+    let catObjId = mongoose.Types.ObjectId.isValid(categoryId) ? new mongoose.Types.ObjectId(categoryId) : null;
+    if (!catObjId) {
+      const TreatmentCategory = require('../models/treatment-category.model');
+      const found = await TreatmentCategory.findOne({
+        $or: [{ code: String(categoryId).toUpperCase() }, { name: new RegExp(`^${categoryId}$`, 'i') }]
+      });
+      if (found) catObjId = found._id;
+    }
+    if (catObjId) {
+      const matchingApts = await Appointment.find({
+        treatmentCategoryId: catObjId,
+        isDeleted: false,
+      }).distinct('patientId');
+      filter.$or = [
+        { treatmentCategoryId: catObjId },
+        { _id: { $in: matchingApts } },
+      ];
+    }
   }
 
   const sortMap = {
@@ -68,11 +85,18 @@ async function getDefaultClinic() {
   const sortDir = sortOrder === 'asc' ? 1 : -1;
 
   const pageNum = Math.max(1, parseInt(page));
-  const pageLimit = Math.min(100, Math.max(1, parseInt(limit)));
+  const parsedLimit = limit === 'all' ? 2000 : parseInt(limit || 200);
+  const pageLimit = Math.min(2000, Math.max(1, isNaN(parsedLimit) ? 200 : parsedLimit));
   const skip = (pageNum - 1) * pageLimit;
 
   const [patients, total] = await Promise.all([
-    Patient.find(filter).sort({ [sortField]: sortDir }).skip(skip).limit(pageLimit).lean(),
+    Patient.find(filter)
+      .populate('assignedDoctorId', 'name specialization')
+      .populate('treatmentCategoryId', 'name code defaultDurationMinutes defaultFollowUpDays')
+      .sort({ [sortField]: sortDir })
+      .skip(skip)
+      .limit(pageLimit)
+      .lean(),
     Patient.countDocuments(filter),
   ]);
 
@@ -91,9 +115,30 @@ async function getDefaultClinic() {
  * Get a single patient by ID.
  */
 async function getPatientById(id) {
-  const patient = await Patient.findById(id).lean();
+  const patient = await Patient.findById(id)
+    .populate('assignedDoctorId', 'name specialization')
+    .populate('treatmentCategoryId', 'name code defaultDurationMinutes defaultFollowUpDays')
+    .lean();
   if (!patient || patient.isDeleted) throw ApiError.notFound('Patient not found.');
   return toFrontendShape(patient);
+}
+
+function normalizeCategory(str) {
+  if (!str) return 'General Consultation';
+  let clean = String(str).trim().toLowerCase();
+  clean = clean.replace(/^cat-/, '').trim();
+  clean = clean.replace(/\s*\([^)]*\)/g, '').trim();
+  if (['root canal', 'rct', 'root canal treatment', 'endodontics & rct', 'endodontics'].includes(clean)) return 'Root Canal Treatment';
+  if (['orthodontic', 'orthodontics', 'othodontic', 'othodontics', 'ortho', 'braces'].includes(clean)) return 'Orthodontics';
+  if (['extraction', 'tooth extraction', 'extractions', 'extract'].includes(clean)) return 'Tooth Extraction';
+  if (['dental implant', 'implant', 'implants', 'dental implants'].includes(clean)) return 'Dental Implant';
+  if (['general consultation', 'consultation', 'consult', 'general dentistry'].includes(clean)) return 'General Consultation';
+  if (['cleaning & scaling', 'scaling & cleaning', 'scale', 'scaling', 'cleaning', 'periodontics'].includes(clean)) return 'Cleaning & Scaling';
+  if (['cavity filling', 'filling', 'fill'].includes(clean)) return 'Cavity Filling';
+  if (['prosthodontics & crown', 'crown', 'prosthodontics', 'implantology & prosthodontics'].includes(clean)) return 'Prosthodontics & Crown';
+  if (['emergency dental', 'emergency', 'emerg'].includes(clean)) return 'Emergency Dental';
+  if (['x-ray & diagnosis', 'x-ray', 'xray', 'diagnosis'].includes(clean)) return 'X-Ray & Diagnosis';
+  return clean;
 }
 
 /**
@@ -118,8 +163,63 @@ async function createPatient(body) {
     : (allergies || []);
 
   const mongoose = require('mongoose');
-  const validDoctorId = assignedDoctorId && mongoose.Types.ObjectId.isValid(assignedDoctorId)
+  let validDoctorId = assignedDoctorId && mongoose.Types.ObjectId.isValid(assignedDoctorId)
     ? assignedDoctorId : undefined;
+
+  if (!validDoctorId) {
+    const defaultDoc = await User.findOne({ clinicId: clinic._id, role: 'doctor', status: 'active' });
+    if (defaultDoc) validDoctorId = defaultDoc._id;
+  }
+
+  // Robust category resolution
+  let validCatId;
+  let catName = 'General Consultation';
+  const catParam = treatmentCategoryId || body.treatmentCategoryName || body.categoryName;
+
+  const allCategories = await TreatmentCategory.find({}).lean();
+
+  if (catParam) {
+    const rawParam = String(catParam).trim();
+    const normParam = normalizeCategory(rawParam).toLowerCase();
+    const cleanCode = rawParam.replace(/^cat-/, '').toUpperCase();
+
+    // 1. Direct ID match
+    let matched = allCategories.find(c => c._id.toString() === rawParam || c.id === rawParam);
+
+    // 2. Direct Code match
+    if (!matched) {
+      matched = allCategories.find(c => c.code && c.code.toUpperCase() === cleanCode);
+    }
+
+    // 3. Normalized Name match
+    if (!matched) {
+      matched = allCategories.find(c => normalizeCategory(c.name).toLowerCase() === normParam);
+    }
+
+    // 4. Fuzzy Substring match
+    if (!matched) {
+      matched = allCategories.find(c => {
+        const cNorm = normalizeCategory(c.name).toLowerCase();
+        return cNorm.includes(normParam) || normParam.includes(cNorm);
+      });
+    }
+
+    if (matched) {
+      validCatId = matched._id;
+      catName = matched.name;
+    } else {
+      catName = body.treatmentCategoryName || body.categoryName || rawParam;
+    }
+  }
+
+  // Fallback to General Consultation if no category was specified
+  if (!validCatId && (!body.treatmentCategoryName && !body.categoryName && !treatmentCategoryId)) {
+    const generalCat = allCategories.find(c => normalizeCategory(c.name).toLowerCase() === 'general consultation') || allCategories[0];
+    if (generalCat) {
+      validCatId = generalCat._id;
+      catName = generalCat.name;
+    }
+  }
 
   const patient = await Patient.create({
     clinicId: clinic._id,
@@ -136,34 +236,51 @@ async function createPatient(body) {
     medicalHistory,
     allergies: allergiesArr,
     assignedDoctorId: validDoctorId,
+    treatmentCategoryId: validCatId,
+    treatmentCategoryName: catName,
     status: 'new',
     registeredAt: new Date(),
     totalVisits: 0,
   });
 
   let initialApt = null;
-  if (appointmentDate && appointmentTime && validDoctorId) {
-    const count2 = await Appointment.countDocuments({ clinicId: clinic._id });
-    const appointmentNumber = `APT-2026-${String(count2 + 1).padStart(4, '0')}`;
-    const startAt = new Date(`${appointmentDate}T${appointmentTime}`);
-    const endAt = new Date(startAt.getTime() + 30 * 60 * 1000);
+  const aptDate = appointmentDate || new Date().toISOString().split('T')[0];
+  const aptTime = appointmentTime || '10:00';
 
-    const validCatId = treatmentCategoryId && mongoose.Types.ObjectId.isValid(treatmentCategoryId)
-      ? treatmentCategoryId : undefined;
+  if (validDoctorId) {
+    try {
+      const count2 = await Appointment.countDocuments({ clinicId: clinic._id });
+      const appointmentNumber = `APT-2026-${String(count2 + 1).padStart(4, '0')}`;
+      // Parse as IST (UTC+5:30) to avoid midnight boundary shifts
+      const startAt = new Date(`${aptDate}T${aptTime}:00+05:30`);
+      const endAt = new Date(startAt.getTime() + 30 * 60 * 1000);
 
-    initialApt = await Appointment.create({
-      clinicId: clinic._id,
-      appointmentNumber,
-      patientId: patient._id,
-      doctorId: validDoctorId,
-      treatmentCategoryId: validCatId,
-      startAt,
-      endAt,
-      durationMinutes: 30,
-      status: 'scheduled',
-      notes: notes || '',
-      createdById: validDoctorId,
-    });
+      const doctor = await User.findById(validDoctorId).lean();
+
+      initialApt = await Appointment.create({
+        clinicId: clinic._id,
+        appointmentNumber,
+        patientId: patient._id,
+        patientName: patient.name,
+        patientPhone: patient.phone || '',
+        doctorId: validDoctorId,
+        doctorName: doctor?.name || '',
+        treatmentCategoryId: validCatId,
+        treatmentCategoryName: catName,
+        date: aptDate,
+        time: aptTime,
+        startAt,
+        endAt,
+        durationMinutes: 30,
+        status: 'scheduled',
+        priority: 'normal',
+        notes: notes || chiefComplaint || '',
+        createdById: validDoctorId,
+        isDeleted: false,
+      });
+    } catch (aptErr) {
+      console.error('[createPatient] Appointment creation failed:', aptErr.message);
+    }
   }
 
   return {
@@ -182,6 +299,7 @@ async function updatePatient(id, body) {
   const allowed = [
     'name', 'phone', 'email', 'address', 'gender', 'bloodGroup',
     'chiefComplaint', 'medicalHistory', 'allergies', 'assignedDoctorId',
+    'treatmentCategoryId', 'treatmentCategoryName',
     'status', 'lastVisitAt', 'nextFollowUpAt', 'totalVisits',
     'emergencyContact', 'dateOfBirth',
   ];
@@ -196,18 +314,55 @@ async function updatePatient(id, body) {
 }
 
 /**
- * Soft-delete a patient (Admin only).
+ * Soft-delete a patient (Admin and Receptionist).
+ * Also cancels and soft-deletes all associated appointments.
  */
 async function softDeletePatient(id) {
-  const patient = await Patient.findById(id);
-  if (!patient || patient.isDeleted) throw ApiError.notFound('Patient not found.');
-  patient.isDeleted = true;
-  await patient.save();
+  const mongoose = require('mongoose');
+  let patient = null;
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    patient = await Patient.findById(id);
+  }
+  if (!patient) {
+    patient = await Patient.findOne({ patientNumber: String(id) });
+  }
+
+  if (patient) {
+    patient.isDeleted = true;
+    await patient.save();
+  }
+
+  // Also soft-delete all appointments associated with this patient
+  const idList = [];
+  if (id) {
+    idList.push(id);
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      idList.push(new mongoose.Types.ObjectId(id));
+    }
+  }
+  if (patient?._id) {
+    idList.push(patient._id);
+    idList.push(patient._id.toString());
+  }
+
+  if (idList.length > 0) {
+    await Appointment.updateMany(
+      { patientId: { $in: idList } },
+      { $set: { isDeleted: true, status: 'cancelled' } }
+    );
+  }
 }
 
 // ─── Shape helpers ────────────────────────────────────────────────────────────
 
 function toFrontendShape(p) {
+  const docObj = p.assignedDoctorId && typeof p.assignedDoctorId === 'object' && p.assignedDoctorId.name ? p.assignedDoctorId : null;
+  const docId = docObj ? docObj._id.toString() : (p.assignedDoctorId ? p.assignedDoctorId.toString() : null);
+
+  const catObj = p.treatmentCategoryId && typeof p.treatmentCategoryId === 'object' && p.treatmentCategoryId.name ? p.treatmentCategoryId : null;
+  const catId = catObj ? catObj._id.toString() : (p.treatmentCategoryId ? p.treatmentCategoryId.toString() : null);
+  const catName = (catObj && catObj.name) || p.treatmentCategoryName || 'General Consultation';
+
   return {
     id: p._id.toString(),
     patientId: p.patientNumber,
@@ -223,7 +378,12 @@ function toFrontendShape(p) {
     chiefComplaint: p.chiefComplaint,
     medicalHistory: p.medicalHistory,
     allergies: Array.isArray(p.allergies) ? p.allergies.join(', ') : (p.allergies || 'None'),
-    assignedDoctorId: p.assignedDoctorId ? p.assignedDoctorId.toString() : null,
+    assignedDoctorId: docId,
+    doctorName: docObj ? docObj.name : null,
+    doctorSpecialization: docObj ? docObj.specialization : null,
+    treatmentCategoryId: catId,
+    treatmentCategoryName: catName,
+    categoryName: catName,
     status: p.status,
     registeredAt: p.registeredAt,
     lastVisit: p.lastVisitAt,
@@ -237,13 +397,18 @@ function toFrontendAppointment(a) {
   const startAt = a.startAt ? new Date(a.startAt) : null;
   return {
     id: a._id.toString(),
-    patientId: a.patientId.toString(),
-    doctorId: a.doctorId.toString(),
-    date: startAt ? startAt.toISOString().split('T')[0] : null,
-    time: startAt ? startAt.toTimeString().slice(0, 5) : null,
+    appointmentNumber: a.appointmentNumber || '',
+    patientId: a.patientId ? a.patientId.toString() : '',
+    patientName: a.patientName || '',
+    patientPhone: a.patientPhone || '',
+    doctorId: a.doctorId ? a.doctorId.toString() : '',
+    doctorName: a.doctorName || '',
+    treatmentCategoryName: a.treatmentCategoryName || 'General Consultation',
+    date: a.date || (startAt ? startAt.toISOString().split('T')[0] : null),
+    time: a.time || (startAt ? startAt.toTimeString().slice(0, 5) : null),
     type: 'Consultation',
-    status: a.status,
-    notes: a.notes,
+    status: a.status || 'scheduled',
+    notes: a.notes || '',
   };
 }
 

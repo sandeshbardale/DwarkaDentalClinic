@@ -109,7 +109,8 @@ function authFetch(endpoint, options = {}) {
 // ─── Compat Thunks ─────────────────────────────────────────────────────────────
 export const fetchPatientsList = (params = {}) => async (dispatch) => {
   try {
-    const q = new URLSearchParams(params).toString();
+    const merged = { limit: 500, ...params };
+    const q = new URLSearchParams(merged).toString();
     const res = await authFetch(`/patients${q ? '?' + q : ''}`);
     const json = await res.json();
     const list = Array.isArray(json) ? json : (json.data?.data ?? json.data ?? []);
@@ -122,7 +123,8 @@ export const fetchPatientsList = (params = {}) => async (dispatch) => {
 
 export const fetchAppointmentsList = (params = {}) => async (dispatch) => {
   try {
-    const q = new URLSearchParams(params).toString();
+    const merged = { limit: 500, ...params };
+    const q = new URLSearchParams(merged).toString();
     const res = await authFetch(`/appointments${q ? '?' + q : ''}`);
     const json = await res.json();
     const list = Array.isArray(json) ? json : (json.data?.data ?? json.data ?? []);
@@ -141,7 +143,12 @@ export const savePatientThunk = (patientData) => async (dispatch) => {
   const json = await res.json();
   if (!res.ok) throw new Error(json.message || 'Failed to register patient.');
   dispatch(fetchPatientsList());
-  dispatch(apiSlice.util.invalidateTags(['Patient']));
+  dispatch(fetchAppointmentsList());
+  dispatch(apiSlice.util.invalidateTags(['Patient', 'Appointment']));
+  // Broadcast update so all pages with event listeners refresh immediately
+  try {
+    window.dispatchEvent(new CustomEvent('ddc_patient_data_updated', { detail: json }));
+  } catch (_) {}
   return json;
 };
 

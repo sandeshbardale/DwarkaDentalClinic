@@ -62,6 +62,8 @@ const router = createBrowserRouter([
         children: [
           { index: true, element: <AdminDashboardPage /> },
           { path: 'patients', element: <AdminPatientsPage /> },
+          { path: 'register', element: <RegisterPatientPage /> },
+          { path: 'patients/new', element: <RegisterPatientPage /> },
           { path: 'patients/:id', element: <AdminPatientDetailPage /> },
           { path: 'appointments', element: <AdminAppointmentsPage /> },
           { path: 'categories', element: <TreatmentCategoriesPage /> },
@@ -95,7 +97,7 @@ const router = createBrowserRouter([
       // ─── Receptionist Routes ───────────────────────────────
       {
         path: 'receptionist',
-        element: <ProtectedRoute allowedRoles="receptionist"><DashboardLayout /></ProtectedRoute>,
+        element: <ProtectedRoute allowedRoles={['receptionist', 'admin']}><DashboardLayout /></ProtectedRoute>,
         children: [
           { index: true, element: <ReceptionistDashboardPage /> },
           { path: 'patients', element: <ReceptionistPatientsPage /> },

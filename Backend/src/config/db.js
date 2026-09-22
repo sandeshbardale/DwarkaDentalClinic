@@ -1,9 +1,5 @@
-const dns = require('node:dns');
 const mongoose = require('mongoose');
 const config = require('./env');
-
-// Prefer Google/Cloudflare DNS for Atlas SRV resolution
-dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 /**
  * Seeds the database with a default Clinic and demo staff accounts if the
