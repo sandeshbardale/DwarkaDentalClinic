@@ -7,10 +7,12 @@
  */
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
 export const apiSlice = createApi({
   reducerPath: 'api',
   baseQuery: fetchBaseQuery({
-    baseUrl: '/api',
+    baseUrl: `${API_BASE}/api`,
     prepareHeaders: (headers) => {
       // Attach x-user-role so the backend admin-only guards work.
       // TODO: replace with a proper Authorization: Bearer <token> header when JWT auth is added.

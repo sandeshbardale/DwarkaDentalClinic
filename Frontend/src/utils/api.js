@@ -18,9 +18,11 @@ function getToken() {
   }
 }
 
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
 /** Core HTTP client — attaches JWT, handles JSON/FormData */
 async function apiCall(endpoint, options = {}) {
-  const url = `/api${endpoint}`;
+  const url = `${API_BASE}/api${endpoint}`;
   const isFormData = options.body instanceof FormData;
 
   const headers = { ...options.headers };
