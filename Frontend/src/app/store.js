@@ -93,17 +93,30 @@ export const { loginStart, loginSuccess, loginFailure, logout } = authSlice.acti
 export const { toggleSidebar, toggleMobileSidebar, closeMobileSidebar, addToast, removeToast, openModal, closeModal } = uiSlice.actions;
 export const { setNotifications, markAsRead, markAllAsRead } = notificationSlice.actions;
 
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
 // ─── Authenticated fetch helper (used by thunks) ─────────────────────────────
-function authFetch(endpoint, options = {}) {
+async function authFetch(endpoint, options = {}) {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     const token = raw ? JSON.parse(raw)?.token : null;
     const headers = { 'Content-Type': 'application/json', ...options.headers };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    return fetch(`/api${endpoint}`, { ...options, headers });
+    return await fetch(`${API_BASE}/api${endpoint}`, { ...options, headers });
   } catch {
-    return fetch(`/api${endpoint}`, options);
+    return await fetch(`${API_BASE}/api${endpoint}`, options);
   }
+}
+
+async function safeJson(res, defaultErrorMsg = 'Request failed') {
+  const text = await res.text();
+  let json;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = { message: `${defaultErrorMsg} (Status ${res.status}): The server returned an invalid or non-JSON response.` };
+  }
+  return json;
 }
 
 // ─── Compat Thunks ─────────────────────────────────────────────────────────────
@@ -112,7 +125,8 @@ export const fetchPatientsList = (params = {}) => async (dispatch) => {
     const merged = { limit: 500, ...params };
     const q = new URLSearchParams(merged).toString();
     const res = await authFetch(`/patients${q ? '?' + q : ''}`);
-    const json = await res.json();
+    const json = await safeJson(res, 'Failed to fetch patients');
+    if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`);
     const list = Array.isArray(json) ? json : (json.data?.data ?? json.data ?? []);
     dispatch(setPatientsList(Array.isArray(list) ? list : []));
   } catch (err) {
@@ -126,7 +140,8 @@ export const fetchAppointmentsList = (params = {}) => async (dispatch) => {
     const merged = { limit: 500, ...params };
     const q = new URLSearchParams(merged).toString();
     const res = await authFetch(`/appointments${q ? '?' + q : ''}`);
-    const json = await res.json();
+    const json = await safeJson(res, 'Failed to fetch appointments');
+    if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`);
     const list = Array.isArray(json) ? json : (json.data?.data ?? json.data ?? []);
     dispatch(setAppointmentsList(Array.isArray(list) ? list : []));
   } catch (err) {
@@ -140,8 +155,8 @@ export const savePatientThunk = (patientData) => async (dispatch) => {
     method: 'POST',
     body: JSON.stringify(patientData),
   });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Failed to register patient.');
+  const json = await safeJson(res, 'Failed to register patient');
+  if (!res.ok) throw new Error(json.message || `Failed to register patient (${res.status}). Ensure the backend is running.`);
   dispatch(fetchPatientsList());
   dispatch(fetchAppointmentsList());
   dispatch(apiSlice.util.invalidateTags(['Patient', 'Appointment']));
@@ -157,8 +172,8 @@ export const bookAppointmentThunk = (aptData) => async (dispatch) => {
     method: 'POST',
     body: JSON.stringify(aptData),
   });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Failed to book appointment.');
+  const json = await safeJson(res, 'Failed to book appointment');
+  if (!res.ok) throw new Error(json.message || `Failed to book appointment (${res.status}).`);
   dispatch(fetchAppointmentsList());
   dispatch(apiSlice.util.invalidateTags(['Appointment']));
   return json;
@@ -169,8 +184,8 @@ export const updateAppointmentStatusThunk = (id, status, nextDate, nextTime, not
     method: 'PUT',
     body: JSON.stringify({ status, nextDate, nextTime, notes }),
   });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Failed to update appointment.');
+  const json = await safeJson(res, 'Failed to update appointment');
+  if (!res.ok) throw new Error(json.message || `Failed to update appointment (${res.status}).`);
   dispatch(fetchAppointmentsList());
   dispatch(apiSlice.util.invalidateTags(['Appointment', 'Patient']));
   return json;

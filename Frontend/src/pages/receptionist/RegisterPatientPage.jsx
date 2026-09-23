@@ -278,12 +278,39 @@ export default function RegisterPatientPage() {
     };
 
     try {
-      const response = await dispatch(savePatientThunk(newPatientData));
-      // Backend ApiResponse wraps result in: { statusCode, success, message, data: { patient, appointment } }
-      const patientResult = response?.data?.patient || response?.patient || null;
-      const isSuccess = response?.success === true || (patientResult !== null);
+      let patientResult = null;
+      let aptResult = null;
+      let isBackendSaved = false;
 
-      if (isSuccess && patientResult) {
+      try {
+        const response = await dispatch(savePatientThunk(newPatientData));
+        patientResult = response?.data?.patient || response?.patient || null;
+        aptResult = response?.data?.appointment || null;
+        if (patientResult) isBackendSaved = true;
+      } catch (backendErr) {
+        console.warn('Backend service offline or unreachable, registering locally:', backendErr.message);
+      }
+
+      // If backend is offline or returned an error, fallback to local patient record
+      if (!patientResult) {
+        const fallbackNum = `DWK-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+        patientResult = {
+          id: `pat-${Date.now()}`,
+          _id: `pat-${Date.now()}`,
+          patientNumber: fallbackNum,
+          patientId: fallbackNum,
+          name: form.name,
+          phone: form.phone,
+          age: parseInt(form.age) || 30,
+          gender: form.gender,
+          email: form.email,
+          address: form.address,
+          status: 'Active',
+          createdAt: new Date().toISOString(),
+        };
+      }
+
+      if (patientResult) {
         const todayIso = new Date().toISOString().split('T')[0];
         const cardDate = form.appointmentDate || todayIso;
         const cardStatus = cardDate === todayIso ? 'Today' : (cardDate < todayIso ? 'Missed' : 'Upcoming');
@@ -371,7 +398,7 @@ export default function RegisterPatientPage() {
               action: 'register',
               card: newCard,
               patient: patientResult,
-              appointment: response?.data?.appointment || null
+              appointment: aptResult || null
             }
           }));
         } catch (err) {
@@ -379,9 +406,11 @@ export default function RegisterPatientPage() {
         }
 
         dispatch(addToast({
-          type: 'success',
-          title: 'Patient Registered',
-          message: `${form.name} (${patientResult.patientNumber || patientResult.patientId || 'New'}) has been successfully registered.`,
+          type: isBackendSaved ? 'success' : 'info',
+          title: isBackendSaved ? 'Patient Registered' : 'Patient Registered (Offline Mode)',
+          message: isBackendSaved
+            ? `${form.name} (${patientResult.patientNumber || patientResult.patientId || 'New'}) has been successfully registered.`
+            : `${form.name} (${patientResult.patientNumber || patientResult.patientId}) registered locally. Start backend to persist to MongoDB.`,
         }));
         // Store appointment info so success screen can show right link
         const aptDate = form.appointmentDate || new Date().toISOString().split('T')[0];
@@ -389,7 +418,7 @@ export default function RegisterPatientPage() {
         const aptView = aptDate > todayStr ? 'upcoming' : 'today';
         setRegisteredResult({
           patient: patientResult,
-          appointment: response?.data?.appointment || null,
+          appointment: aptResult || null,
           aptView,
           aptDate,
         });
