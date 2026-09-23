@@ -23,7 +23,42 @@ const GENDER_OPTIONS = [
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
+const CATEGORY_SCHEDULE_DAYS = {
+  orthodontics: 28,
+  orthodontic: 28,
+  ortho: 28,
+  'root canal treatment': 10,
+  'root canal': 10,
+  rct: 10,
+  'cavity filling': 30,
+  filling: 30,
+  fill: 30,
+  'general consultation': 30,
+  consultation: 30,
+  consult: 30,
+  'dental implant': 14,
+  implant: 14,
+  'tooth extraction': 7,
+  extraction: 7,
+  extract: 7,
+  'prosthodontics & crown': 7,
+  crown: 7,
+  'cleaning & scaling': 180,
+  scaling: 180,
+  'emergency dental': 3,
+  emergency: 3,
+  'x-ray & diagnosis': 7,
+  xray: 7,
+};
 
+function addDaysToDate(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + Number(days || 0));
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 const initialForm = {
   // Step 1
@@ -35,6 +70,11 @@ const initialForm = {
   chiefComplaint: '', allergies: 'None', medicalHistory: 'No significant medical history',
   assignedDoctorId: '', appointmentDate: today(), appointmentTime: '', treatmentCategoryId: '',
   notes: '',
+  // Advance Payment
+  advancePayment: '1000',
+  totalFee: '5000',
+  paymentMode: 'UPI',
+  paymentNotes: 'Registration Advance Deposit',
 };
 
 export default function RegisterPatientPage() {
@@ -50,22 +90,47 @@ export default function RegisterPatientPage() {
   const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
   const [newCat, setNewCat] = useState({ name: '', code: '', defaultDurationMinutes: 30, defaultFollowUpDays: 30 });
   const [catSaving, setCatSaving] = useState(false);
+  const [autoScheduleHint, setAutoScheduleHint] = useState(null);
 
   const [doctors, setDoctors] = useState([]);
   const [categories, setCategories] = useState([]);
 
   const DEFAULT_CATEGORIES = [
-    { id: 'CONSULT', name: 'General Consultation', defaultDurationMinutes: 30 },
-    { id: 'ORTHO', name: 'Orthodontics', defaultDurationMinutes: 45 },
-    { id: 'RCT', name: 'Root Canal Treatment', defaultDurationMinutes: 60 },
-    { id: 'EXTRACT', name: 'Tooth Extraction', defaultDurationMinutes: 30 },
-    { id: 'FILL', name: 'Cavity Filling', defaultDurationMinutes: 45 },
-    { id: 'SCALE', name: 'Cleaning & Scaling', defaultDurationMinutes: 45 },
-    { id: 'IMPLANT', name: 'Dental Implant', defaultDurationMinutes: 90 },
-    { id: 'CROWN', name: 'Prosthodontics & Crown', defaultDurationMinutes: 60 },
-    { id: 'EMERG', name: 'Emergency Dental', defaultDurationMinutes: 30 },
-    { id: 'XRAY', name: 'X-Ray & Diagnosis', defaultDurationMinutes: 20 },
+    { id: 'CONSULT', name: 'General Consultation', defaultDurationMinutes: 30, defaultFollowUpDays: 30 },
+    { id: 'ORTHO', name: 'Orthodontics', defaultDurationMinutes: 45, defaultFollowUpDays: 28 },
+    { id: 'RCT', name: 'Root Canal Treatment', defaultDurationMinutes: 60, defaultFollowUpDays: 10 },
+    { id: 'EXTRACT', name: 'Tooth Extraction', defaultDurationMinutes: 30, defaultFollowUpDays: 7 },
+    { id: 'FILL', name: 'Cavity Filling', defaultDurationMinutes: 45, defaultFollowUpDays: 30 },
+    { id: 'SCALE', name: 'Cleaning & Scaling', defaultDurationMinutes: 45, defaultFollowUpDays: 180 },
+    { id: 'IMPLANT', name: 'Dental Implant', defaultDurationMinutes: 90, defaultFollowUpDays: 14 },
+    { id: 'CROWN', name: 'Prosthodontics & Crown', defaultDurationMinutes: 60, defaultFollowUpDays: 7 },
+    { id: 'EMERG', name: 'Emergency Dental', defaultDurationMinutes: 30, defaultFollowUpDays: 3 },
+    { id: 'XRAY', name: 'X-Ray & Diagnosis', defaultDurationMinutes: 20, defaultFollowUpDays: 7 },
   ];
+
+  function handleCategoryChange(selectedId, catList = categories, docList = doctors) {
+    update('treatmentCategoryId', selectedId);
+    const matched = catList.find(c => String(c.id || c._id) === String(selectedId));
+    if (matched) {
+      const normCatName = normalizeCategoryName(matched.name).toLowerCase();
+      let days = matched.defaultFollowUpDays;
+      if (!days || isNaN(days)) {
+        days = CATEGORY_SCHEDULE_DAYS[normCatName] ?? 28;
+      }
+      const autoDate = addDaysToDate(days);
+      update('appointmentDate', autoDate);
+      setAutoScheduleHint({ days, catName: matched.name, date: autoDate });
+
+      // Auto assign specialist doctor if available and none selected yet
+      const matchedDoc = docList.find(d => {
+        const docSpec = normalizeCategoryName(d.specialization || '').toLowerCase();
+        return docSpec === normCatName || docSpec.includes(normCatName) || normCatName.includes(docSpec);
+      });
+      if (matchedDoc) {
+        update('assignedDoctorId', matchedDoc.id || matchedDoc._id);
+      }
+    }
+  }
 
   useEffect(() => {
     let localDocs = [];
@@ -89,18 +154,20 @@ export default function RegisterPatientPage() {
       defaults.forEach(d => map.set(d.name.toLowerCase(), d));
       localDocs.forEach(d => map.set(d.name.toLowerCase(), d));
       apiDocs.forEach(d => map.set(d.name.toLowerCase(), d));
-      setDoctors(Array.from(map.values()));
+      const finalDocs = Array.from(map.values());
+      setDoctors(finalDocs);
+      fetchCategories(finalDocs);
     }).catch(() => {
       const map = new Map();
       defaults.forEach(d => map.set(d.name.toLowerCase(), d));
       localDocs.forEach(d => map.set(d.name.toLowerCase(), d));
-      setDoctors(Array.from(map.values()));
+      const finalDocs = Array.from(map.values());
+      setDoctors(finalDocs);
+      fetchCategories(finalDocs);
     });
-
-    fetchCategories();
   }, []);
 
-  function fetchCategories() {
+  function fetchCategories(availableDoctors = doctors) {
     const queryCategory = searchParams.get('category') || searchParams.get('categoryId') || '';
 
     api.getCategories({ status: 'active' }).then(res => {
@@ -126,17 +193,7 @@ export default function RegisterPatientPage() {
           (c.code && normQ.includes(c.code.toLowerCase()))
         );
         if (matched) {
-          const selectedId = matched.id || matched._id;
-          update('treatmentCategoryId', selectedId);
-          // Auto assign doctor
-          const normCatName = normalizeCategoryName(matched.name).toLowerCase();
-          const matchedDoc = doctors.find(d => {
-            const docSpec = normalizeCategoryName(d.specialization || '').toLowerCase();
-            return docSpec === normCatName || docSpec.includes(normCatName) || normCatName.includes(docSpec);
-          });
-          if (matchedDoc) {
-            update('assignedDoctorId', matchedDoc.id || matchedDoc._id);
-          }
+          handleCategoryChange(matched.id || matched._id, list, availableDoctors);
         }
       }
     }).catch(() => {
@@ -152,8 +209,7 @@ export default function RegisterPatientPage() {
           (c.code && normQ.includes(c.code.toLowerCase()))
         );
         if (matched) {
-          const selectedId = matched.id || matched._id;
-          update('treatmentCategoryId', selectedId);
+          handleCategoryChange(matched.id || matched._id, list, availableDoctors);
         }
       }
     });
@@ -251,6 +307,11 @@ export default function RegisterPatientPage() {
     const catId = selectedCat?.id || selectedCat?._id || form.treatmentCategoryId;
     const docName = selectedDoc?.name || 'Dr. Bhagwan Rakh';
 
+    const advanceNum = parseFloat(form.advancePayment) || 0;
+    const totalNum = parseFloat(form.totalFee) || (advanceNum > 0 ? advanceNum * 2 : 5000);
+    const dueNum = Math.max(0, totalNum - advanceNum);
+    const payStatus = advanceNum >= totalNum && totalNum > 0 ? 'Paid' : (advanceNum > 0 ? 'Partially Paid' : 'Pending');
+
     const newPatientData = {
       name: form.name,
       age: parseInt(form.age),
@@ -275,6 +336,10 @@ export default function RegisterPatientPage() {
       treatmentCategoryName: catName,
       categoryName: catName,
       notes: form.notes,
+      advanceAmount: advanceNum,
+      totalFee: totalNum,
+      paymentMode: form.paymentMode || 'UPI',
+      paymentNotes: form.paymentNotes || 'Registration Advance Deposit',
     };
 
     try {
@@ -349,22 +414,23 @@ export default function RegisterPatientPage() {
             treatmentCategoryId: catId,
             treatmentCategoryName: catName,
             status: cardStatus,
-            totalFee: 15000,
-            amountPaid: 3000,
-            amountDue: 12000,
-            paymentStatus: 'Pending',
-            nextAppointmentDays: 28,
+            totalFee: totalNum,
+            amountPaid: advanceNum,
+            amountDue: dueNum,
+            paymentStatus: payStatus,
+            paymentMode: form.paymentMode || 'UPI',
+            nextAppointmentDays: autoScheduleHint?.days || 28,
             createdAt: new Date().toISOString(),
-            paymentHistory: [
+            paymentHistory: advanceNum > 0 ? [
               {
                 id: `pay-${Date.now()}`,
                 receiptNo: `RCP-2026-${Math.floor(100 + Math.random() * 900)}`,
                 date: todayIso,
-                mode: 'UPI',
-                amount: 3000,
-                notes: 'Registration Deposit'
+                mode: form.paymentMode || 'UPI',
+                amount: advanceNum,
+                notes: form.paymentNotes || 'Registration Advance Deposit'
               }
-            ]
+            ] : []
           };
           localStorage.setItem('ddc_patient_cards_v2', JSON.stringify([newCard, ...deduped]));
           try {
@@ -398,7 +464,8 @@ export default function RegisterPatientPage() {
               action: 'register',
               card: newCard,
               patient: patientResult,
-              appointment: aptResult || null
+              appointment: aptResult || null,
+              payment: advanceNum > 0 ? newCard.paymentHistory[0] : null
             }
           }));
         } catch (err) {
@@ -409,8 +476,8 @@ export default function RegisterPatientPage() {
           type: isBackendSaved ? 'success' : 'info',
           title: isBackendSaved ? 'Patient Registered' : 'Patient Registered (Offline Mode)',
           message: isBackendSaved
-            ? `${form.name} (${patientResult.patientNumber || patientResult.patientId || 'New'}) has been successfully registered.`
-            : `${form.name} (${patientResult.patientNumber || patientResult.patientId}) registered locally. Start backend to persist to MongoDB.`,
+            ? `${form.name} (${patientResult.patientNumber || patientResult.patientId || 'New'}) registered with ₹${advanceNum.toLocaleString('en-IN')} advance.`
+            : `${form.name} (${patientResult.patientNumber || patientResult.patientId}) registered locally with ₹${advanceNum.toLocaleString('en-IN')} advance.`,
         }));
         // Store appointment info so success screen can show right link
         const aptDate = form.appointmentDate || new Date().toISOString().split('T')[0];
@@ -421,6 +488,10 @@ export default function RegisterPatientPage() {
           appointment: aptResult || null,
           aptView,
           aptDate,
+          advanceAmount: advanceNum,
+          totalFee: totalNum,
+          amountDue: dueNum,
+          paymentMode: form.paymentMode || 'UPI',
         });
         setDone(true);
       } else {
@@ -475,6 +546,12 @@ export default function RegisterPatientPage() {
                 registeredResult.aptView === 'today' ? 'text-amber-600' : 'text-blue-600'
               }`}>{registeredResult.aptView === 'today' ? '🟡 Today' : '🔵 Upcoming'}</span>
             </div>
+            {registeredResult.advanceAmount > 0 && (
+              <div className="pt-2 border-t border-emerald-200 text-xs flex items-center justify-between text-emerald-950 font-medium">
+                <span>Advance Paid: <strong className="text-emerald-800 font-semibold">₹{registeredResult.advanceAmount.toLocaleString('en-IN')}</strong> ({registeredResult.paymentMode})</span>
+                <span>Due: <strong className="text-amber-800 font-semibold">₹{registeredResult.amountDue.toLocaleString('en-IN')}</strong></span>
+              </div>
+            )}
           </div>
         )}
 
@@ -596,16 +673,120 @@ export default function RegisterPatientPage() {
                   </div>
                   <Select
                     id="reg-category"
-                    options={categories.map(c => ({ value: c.id, label: `${c.name} (${c.defaultDurationMinutes || 30} min)` }))}
+                    options={categories.map(c => ({ value: c.id, label: c.name }))}
                     placeholder={categories.length === 0 ? 'Loading categories…' : 'Select category'}
                     value={form.treatmentCategoryId}
-                    onChange={e => update('treatmentCategoryId', e.target.value)}
+                    onChange={e => handleCategoryChange(e.target.value)}
                   />
                 </div>
-                <Input label="Appointment Date" id="reg-apt-date" type="date" value={form.appointmentDate} onChange={e => update('appointmentDate', e.target.value)} min={today()} />
+                <div>
+                  <Input
+                    label="Appointment Date"
+                    id="reg-apt-date"
+                    type="date"
+                    value={form.appointmentDate}
+                    onChange={e => { update('appointmentDate', e.target.value); setAutoScheduleHint(null); }}
+                    min={today()}
+                  />
+                  {autoScheduleHint && (
+                    <p className="text-xs text-emerald-700 font-medium mt-1 flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      <span>⚡</span> Auto-scheduled +{autoScheduleHint.days} days for {autoScheduleHint.catName}
+                    </p>
+                  )}
+                </div>
                 <Input label="Appointment Time" id="reg-apt-time" type="time" value={form.appointmentTime} onChange={e => update('appointmentTime', e.target.value)} />
               </div>
             </div>
+
+            {/* Advance Payment & Billing Section */}
+            <div className="pt-3 border-t border-[var(--color-border)]">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold text-sm border border-emerald-200">
+                    ₹
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-[var(--color-text)]">Advance Payment & Deposit</p>
+                    <p className="text-xs text-[var(--color-text-muted)]">Collect advance fee or registration deposit</p>
+                  </div>
+                </div>
+                <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  Advance: ₹{Number(form.advancePayment || 0).toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 bg-[var(--color-bg-subtle)]/70 p-4 rounded-xl border border-[var(--color-border)]">
+                <div>
+                  <label htmlFor="reg-advance-payment" className="text-xs font-medium text-[var(--color-text-muted)] block mb-1">
+                    Advance Amount Paid (₹) <span className="text-emerald-600 font-bold">*</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] text-sm font-semibold">₹</span>
+                    <input
+                      id="reg-advance-payment"
+                      type="number"
+                      min="0"
+                      step="100"
+                      placeholder="e.g. 1000"
+                      value={form.advancePayment}
+                      onChange={e => update('advancePayment', e.target.value)}
+                      className="input pl-8 w-full font-semibold text-[var(--color-text)]"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="reg-total-fee" className="text-xs font-medium text-[var(--color-text-muted)] block mb-1">
+                    Estimated Total Fee (₹)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] text-sm font-semibold">₹</span>
+                    <input
+                      id="reg-total-fee"
+                      type="number"
+                      min="0"
+                      step="500"
+                      placeholder="e.g. 5000"
+                      value={form.totalFee}
+                      onChange={e => update('totalFee', e.target.value)}
+                      className="input pl-8 w-full text-[var(--color-text)]"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Select
+                    label="Payment Mode"
+                    id="reg-payment-mode"
+                    options={[
+                      { value: 'UPI', label: 'UPI (GPay / PhonePe / Paytm)' },
+                      { value: 'Cash', label: 'Cash' },
+                      { value: 'Card', label: 'Credit / Debit Card' },
+                      { value: 'Bank Transfer', label: 'Bank Transfer / Net Banking' },
+                    ]}
+                    value={form.paymentMode}
+                    onChange={e => update('paymentMode', e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Real-time Calculation Summary */}
+              <div className="mt-2.5 flex flex-wrap items-center justify-between text-xs px-3.5 py-2 rounded-lg bg-emerald-50/90 border border-emerald-200 text-emerald-900">
+                <div className="flex items-center gap-3.5 flex-wrap">
+                  <span>Advance Paid: <strong className="font-semibold text-emerald-800">₹{Number(form.advancePayment || 0).toLocaleString('en-IN')}</strong></span>
+                  <span className="text-emerald-300">|</span>
+                  <span>Total Fee: <strong className="font-semibold text-gray-700">₹{Number(form.totalFee || 0).toLocaleString('en-IN')}</strong></span>
+                  <span className="text-emerald-300">|</span>
+                  <span>Balance Due: <strong className="font-semibold text-amber-700">₹{Math.max(0, (Number(form.totalFee || 0) - Number(form.advancePayment || 0))).toLocaleString('en-IN')}</strong></span>
+                </div>
+                <span className="font-semibold px-2 py-0.5 rounded text-[11px] bg-white text-emerald-800 border border-emerald-200 shadow-2xs">
+                  {Number(form.advancePayment || 0) >= Number(form.totalFee || 0) && Number(form.totalFee || 0) > 0
+                    ? 'Fully Paid'
+                    : (Number(form.advancePayment || 0) > 0 ? 'Partial Advance' : 'No Advance (Pending)')}
+                </span>
+              </div>
+            </div>
+
             <Textarea label="Additional Notes" id="reg-notes" value={form.notes} onChange={e => update('notes', e.target.value)} rows={2} placeholder="Any additional information…" />
           </div>
         )}

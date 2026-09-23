@@ -283,9 +283,35 @@ async function createPatient(body) {
     }
   }
 
+  let recordedPayment = null;
+  const advanceAmount = Number(body.advanceAmount || body.advancePayment || 0);
+  if (advanceAmount > 0) {
+    try {
+      const paymentService = require('./payment.service');
+      let pMethod = 'upi';
+      const rawMethod = String(body.paymentMode || 'upi').toLowerCase().trim();
+      if (rawMethod.includes('cash')) pMethod = 'cash';
+      else if (rawMethod.includes('card')) pMethod = 'card';
+      else if (rawMethod.includes('bank') || rawMethod.includes('transfer') || rawMethod.includes('net')) pMethod = 'bank_transfer';
+      else pMethod = 'upi';
+
+      recordedPayment = await paymentService.addPayment({
+        patientId: patient._id,
+        appointmentId: initialApt ? initialApt._id : undefined,
+        amount: advanceAmount,
+        mode: pMethod,
+        notes: body.paymentNotes || 'Registration Advance Payment',
+        date: aptDate,
+      }, { id: validDoctorId || clinic._id });
+    } catch (payErr) {
+      console.error('[createPatient] Advance payment creation failed:', payErr.message);
+    }
+  }
+
   return {
     patient: toFrontendShape(patient.toObject()),
     appointment: initialApt ? toFrontendAppointment(initialApt.toObject()) : null,
+    payment: recordedPayment || null,
   };
 }
 
